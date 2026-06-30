@@ -35,3 +35,9 @@ class MarketModel(eqx.Module):
         raise NotImplementedError(
             f"{type(self).__name__} must implement _diffusion(self, t, state)"
         )
+
+    def initial_state(self) -> Any:
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement initial_state() "
+            "or pass y0 explicitly to simulate()"
+        )

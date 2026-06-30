@@ -87,7 +87,7 @@ def simulate(
     time_grid: TimeGrid,
     n_paths: int,
     seed: int,
-    y0: jax.Array,
+    y0: jax.Array | None = None,
     *,
     return_randomness: bool = False,
     randomness: jax.Array | None = None,
@@ -109,7 +109,8 @@ def simulate(
         identical (model, time_grid, n_paths, seed) inputs on the same backend
         always produce bit-identical results (FR-4, NFR-1).
     y0:
-        Initial state, shared across all paths.
+        Initial state, shared across all paths.  When ``None``, the model's
+        ``initial_state()`` method is called to obtain the initial state.
     return_randomness:
         When ``True``, also returns the Brownian increments used to generate
         the paths, enabling deterministic replay (FR-5).
@@ -126,6 +127,9 @@ def simulate(
         When ``return_randomness=True``; the second element is Brownian
         increments of shape ``(n_paths, T-1, *state_shape)``.
     """
+    if y0 is None:
+        y0 = model.initial_state()
+
     if randomness is not None:
         # Replay mode: run the deterministic scan over pre-computed increments.
         sde_result = replay_sde(model, time_grid, y0, randomness)
