@@ -87,6 +87,38 @@ def _default_path(
 
 
 # ---------------------------------------------------------------------------
+# Shared Euler-Maruyama scan (used by both path B and replay)
+# ---------------------------------------------------------------------------
+
+def _euler_maruyama_scan(
+    model: MarketModel,
+    ts: jax.Array,
+    y0: jax.Array,
+    dW: jax.Array,  # (T-1, *state_shape) pre-computed increments
+) -> jax.Array:
+    """Euler-Maruyama scan over pre-computed Brownian increments.
+
+    Returns the full path of shape (T, *state_shape), prepending y0.
+    """
+    dt = jnp.diff(ts)
+
+    def _step(
+        carry_y: jax.Array,
+        inp: tuple[jax.Array, jax.Array, jax.Array],
+    ) -> tuple[jax.Array, jax.Array]:
+        t, dw, dti = inp
+        y_next = (
+            carry_y
+            + model._drift(t, carry_y) * dti
+            + model._diffusion(t, carry_y) * dw
+        )
+        return y_next, y_next
+
+    _, ys_steps = jax.lax.scan(_step, y0, (ts[:-1], dW, dt))
+    return jnp.concatenate([y0[None], ys_steps], axis=0)  # (T, *state_shape)
+
+
+# ---------------------------------------------------------------------------
 # Construction path B — explicit Brownian increments (FR-5, AD-3)
 # ---------------------------------------------------------------------------
 
@@ -100,33 +132,39 @@ def _randomness_path(
 
     Separate construction from _default_path: no diffrax Brownian tree, no
     conditional flag.  Pre-generates dW_i ~ N(0, dt_i) for each time step,
-    then runs a jax.lax.scan Euler-Maruyama loop (AD-3).
+    then delegates to _euler_maruyama_scan (AD-3).
     """
-    dt = jnp.diff(ts)                        # (T-1,) step widths
+    dt = jnp.diff(ts)
     noise_keys = jax.random.split(key, dt.shape[0])
 
     def _sample_increment(k: jax.Array, dti: jax.Array) -> jax.Array:
         return jax.random.normal(k, shape=y0.shape) * jnp.sqrt(dti)
 
     dW = jax.vmap(_sample_increment)(noise_keys, dt)  # (T-1, *state_shape)
-
-    def _euler_step(
-        carry_y: jax.Array,
-        inp: tuple[jax.Array, jax.Array, jax.Array],
-    ) -> tuple[jax.Array, jax.Array]:
-        t, dw, dti = inp
-        y_next = (
-            carry_y
-            + model._drift(t, carry_y) * dti
-            + model._diffusion(t, carry_y) * dw
-        )
-        return y_next, y_next
-
-    _, ys_steps = jax.lax.scan(_euler_step, y0, (ts[:-1], dW, dt))
-    # Prepend y0 so ys aligns with the full T-point TimeGrid
-    ys = jnp.concatenate([y0[None], ys_steps], axis=0)  # (T, *state_shape)
-
+    ys = _euler_maruyama_scan(model, ts, y0, dW)
     return ys, dW
+
+
+# ---------------------------------------------------------------------------
+# Replay entry point — deterministic replay from stored increments (FR-5)
+# ---------------------------------------------------------------------------
+
+def replay_sde(
+    model: MarketModel,
+    time_grid: TimeGrid,
+    y0: jax.Array,
+    brownian_increments: jax.Array,  # (n_paths, T-1, *state_shape)
+) -> SDEResult:
+    """Reproduce paths deterministically from pre-computed Brownian increments.
+
+    Runs _euler_maruyama_scan for each path, producing bit-identical results
+    to the _randomness_path that generated the same ``brownian_increments``.
+    """
+    ts = time_grid.t
+    ys = jax.vmap(
+        lambda dW: _euler_maruyama_scan(model, ts, y0, dW)
+    )(brownian_increments)
+    return SDEResult(ys=ys)
 
 
 # ---------------------------------------------------------------------------
