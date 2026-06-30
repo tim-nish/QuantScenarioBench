@@ -63,13 +63,11 @@ def _assemble_scenario(
 ) -> Scenario:
     """Build a Scenario from raw SDE output.
 
-    Convention for v1: the full SDE path is the observation; latent_state is
-    an explicitly empty array (shape (n_paths, 0)) for models with no latent
-    process (FR-2).  Models with latent state will override this via their
-    own splitting logic in a future story.
+    Delegates state splitting to model.split_state(ys): models without a
+    latent process return an empty latent_state by default; models like
+    Heston override split_state to separate observation from latent (FR-2).
     """
-    observation = ys
-    latent_state = jnp.empty((n_paths, 0))
+    observation, latent_state = model.split_state(ys)
     metadata = _build_metadata(model, time_grid, n_paths, seed)
     return Scenario(
         observation=observation,

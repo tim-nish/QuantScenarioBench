@@ -67,11 +67,14 @@ def _default_path(
         shape=y0.shape,
         key=key,
     )
+    def _diffusion_op(t, y, args):
+        diff = model._diffusion(t, y)
+        if diff.ndim >= 2:
+            return lineax.MatrixLinearOperator(diff)
+        return lineax.DiagonalLinearOperator(diff)
+
     drift_term = diffrax.ODETerm(lambda t, y, args: model._drift(t, y))
-    noise_term = diffrax.ControlTerm(
-        lambda t, y, args: lineax.DiagonalLinearOperator(model._diffusion(t, y)),
-        bm,
-    )
+    noise_term = diffrax.ControlTerm(_diffusion_op, bm)
     solution = diffrax.diffeqsolve(
         diffrax.MultiTerm(drift_term, noise_term),
         solver=diffrax.Euler(),
@@ -107,11 +110,10 @@ def _euler_maruyama_scan(
         inp: tuple[jax.Array, jax.Array, jax.Array],
     ) -> tuple[jax.Array, jax.Array]:
         t, dw, dti = inp
-        y_next = (
-            carry_y
-            + model._drift(t, carry_y) * dti
-            + model._diffusion(t, carry_y) * dw
-        )
+        diff = model._diffusion(t, carry_y)
+        # matrix-valued diffusion: use matmul; scalar/diagonal: use elementwise
+        noise = diff @ dw if diff.ndim >= 2 else diff * dw
+        y_next = carry_y + model._drift(t, carry_y) * dti + noise
         return y_next, y_next
 
     _, ys_steps = jax.lax.scan(_step, y0, (ts[:-1], dW, dt))
