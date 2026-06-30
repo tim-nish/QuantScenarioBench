@@ -1,0 +1,2 @@
+class QuantScenarioBenchValidationWarning(UserWarning):
+    pass
