@@ -1,2 +1,3 @@
-# Public API: simulate()
-# Implemented in Story 1.4
+from ._simulate import simulate
+
+__all__ = ["simulate"]
