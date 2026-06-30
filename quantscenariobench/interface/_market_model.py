@@ -41,3 +41,17 @@ class MarketModel(eqx.Module):
             f"{type(self).__name__} must implement initial_state() "
             "or pass y0 explicitly to simulate()"
         )
+
+    def split_state(self, ys: Any) -> tuple[Any, Any]:
+        """Split solver output into (observation, latent_state).
+
+        Default: full SDE path is observation; latent_state is empty.
+        Override for models that carry a latent process (e.g. Heston variance).
+
+        Parameters
+        ----------
+        ys:
+            Raw solver output, shape (n_paths, T, *state_shape).
+        """
+        import jax.numpy as jnp
+        return ys, jnp.empty((ys.shape[0], 0))
