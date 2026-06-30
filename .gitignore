@@ -1,2 +1,19 @@
 # Personal, installer-regenerated BMad Method config — not team-shared
 _bmad/config.user.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
