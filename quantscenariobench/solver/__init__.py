@@ -1,2 +1,3 @@
-# Internal Solver Layer — the only module that imports diffrax
-# Implemented in Story 1.3
+from ._sde import SDEResult, SDEResultWithRandomness, solve_sde
+
+__all__ = ["SDEResult", "SDEResultWithRandomness", "solve_sde"]
