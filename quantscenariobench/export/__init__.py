@@ -1,2 +1,4 @@
-# Parquet / Hugging Face export — generic over Scenario schema
-# Implemented in Stories 3.1, 3.2
+# Parquet / Hugging Face export — generic over Scenario schema (AD-5, AD-9)
+from ._parquet import export_parquet
+
+__all__ = ["export_parquet"]
