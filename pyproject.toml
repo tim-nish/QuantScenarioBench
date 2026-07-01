@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "quantscenariobench"
-version = "0.1.0"
+version = "1.0.0"
 description = "JAX-native framework for generating reproducible market scenarios and publishing them as benchmark datasets"
 requires-python = ">=3.11"
 dependencies = [
