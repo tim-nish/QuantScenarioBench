@@ -218,6 +218,17 @@ def solve_sde(
     path_keys = jax.random.split(key, n_paths)
     ts = time_grid.t
 
+    # Models that cannot be expressed as Markovian SDEs (e.g. rBergomi) override
+    # _generate_paths to return a full (n_paths, T, *state_shape) array directly.
+    custom_ys = model._generate_paths(ts, n_paths, key)
+    if custom_ys is not None:
+        if return_randomness:
+            raise NotImplementedError(
+                f"{type(model).__name__}._generate_paths does not support "
+                "return_randomness=True"
+            )
+        return SDEResult(ys=custom_ys)
+
     if return_randomness:
         ys, dW = jax.vmap(lambda k: _randomness_path(model, ts, y0, k))(path_keys)
         return SDEResultWithRandomness(ys=ys, brownian_increments=dW)
