@@ -184,31 +184,29 @@ All simulations run in **float64** (enabled automatically on `import quantscenar
 
 ---
 
-## Pre-built Benchmark Datasets
+## Pre-built Benchmark Samples
 
-Three v1 benchmark datasets are published on Hugging Face for immediate use:
+Three lightweight demo samples are published on Hugging Face. They use a single fixed configuration (10,000 paths, daily steps over 1 year, seed 42) and are sized for quick loading, not research-scale use. They are useful for inspecting the output schema and doing quick cross-model comparisons without generating anything locally.
 
-| Model | Dataset | Paths | Steps |
-|-------|---------|-------|-------|
-| Black-Scholes | [tim-nish/qsb-black-scholes](https://huggingface.co/datasets/tim-nish/qsb-black-scholes) | 10,000 | 253 (daily, 1 yr) |
-| Heston | [tim-nish/qsb-heston](https://huggingface.co/datasets/tim-nish/qsb-heston) | 10,000 | 253 (daily, 1 yr) |
-| Rough Bergomi | [tim-nish/qsb-rough-bergomi](https://huggingface.co/datasets/tim-nish/qsb-rough-bergomi) | 10,000 | 253 (daily, 1 yr) |
+| Model | Sample | Paths | Steps |
+|-------|--------|-------|-------|
+| Black-Scholes | [QuantScenarioBench/qsb-black-scholes](https://huggingface.co/datasets/QuantScenarioBench/qsb-black-scholes) | 10,000 | 253 (daily, 1 yr) |
+| Heston | [QuantScenarioBench/qsb-heston](https://huggingface.co/datasets/QuantScenarioBench/qsb-heston) | 10,000 | 253 (daily, 1 yr) |
+| Rough Bergomi | [QuantScenarioBench/qsb-rough-bergomi](https://huggingface.co/datasets/QuantScenarioBench/qsb-rough-bergomi) | 10,000 | 253 (daily, 1 yr) |
 
 All three use the same time grid (`linspace(0, 1, 253)`), seed (`42`), and initial spot (`S0=100`, `mu=0`) for direct cross-model comparison.
-
-Load any dataset with:
 
 ```python
 from datasets import load_dataset
 
-ds = load_dataset("tim-nish/qsb-heston", split="train")
+ds = load_dataset("QuantScenarioBench/qsb-heston", split="train")
 print(ds.column_names)
 # ['observation', 'latent_state', 'seed', 'prng_key_info', 'model_name',
 #  'model_version', 'parameters', 'time_grid', 'n_paths',
 #  'library_version', 'dataset_version', 'generated_at']
 ```
 
-These datasets are representative samples. To generate a dataset at any scale or with custom parameters, use `simulate()` and `export_parquet()` or `publish_to_hub()` directly.
+For research use, generate your own dataset at any scale with `simulate()` and `export_parquet()` or `publish_to_hub()`.
 
 ---
 
