@@ -42,6 +42,14 @@ class MarketModel(eqx.Module):
             "or pass y0 explicitly to simulate()"
         )
 
+    def _generate_paths(self, ts: Any, n_paths: int, key: Any) -> Any:
+        """Custom full-path generator. Override for non-Markovian models (e.g. rBergomi).
+
+        Returns an array of shape (n_paths, T, *state_shape), or None to use
+        the standard diffrax Euler-Maruyama solver (default).
+        """
+        return None
+
     def split_state(self, ys: Any) -> tuple[Any, Any]:
         """Split solver output into (observation, latent_state).
 
