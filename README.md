@@ -1,6 +1,6 @@
 # QuantScenarioBench
 
-A JAX-native Python framework for generating reproducible stochastic market scenarios and publishing them as Hugging Face benchmark datasets.
+A JAX-native Python framework for generating reproducible stochastic market scenarios, with built-in export to Parquet and the Hugging Face Hub.
 
 ```python
 from quantscenariobench.api import simulate
@@ -21,7 +21,7 @@ print(scenario.latent_state.shape)   # (10000, 253)  — variance paths
 
 ## Why QuantScenarioBench?
 
-Quantitative finance research routinely benchmarks models against each other, but reproducible, openly published path datasets are rare. QuantScenarioBench makes it straightforward to:
+Quantitative finance research routinely benchmarks models against each other, but reproducible, openly published path datasets are rare. QuantScenarioBench is useful for model benchmarking, evaluation, stress testing, and general experimentation with stochastic volatility models, and makes it straightforward to:
 
 - **Generate** large batches of price paths from established stochastic volatility models with a single call
 - **Compare** models on a shared schema — every `Scenario` has the same fields regardless of the model used
@@ -206,7 +206,7 @@ print(ds.column_names)
 #  'library_version', 'dataset_version', 'generated_at']
 ```
 
-For research use, generate your own dataset at any scale with `simulate()` and `export_parquet()` or `publish_to_hub()`.
+For research use, generate your own dataset with your chosen horizon, time grid, parameters, and number of paths using `simulate()`, then export it with `export_parquet()` or `publish_to_hub()`.
 
 ---
 
