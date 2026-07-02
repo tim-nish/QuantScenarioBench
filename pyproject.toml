@@ -13,6 +13,7 @@ dependencies = [
     "equinox>=0.11.10",
     "pyarrow>=14.0",
     "huggingface_hub>=0.23",
+    "scipy>=1.16",
 ]
 
 [project.optional-dependencies]
