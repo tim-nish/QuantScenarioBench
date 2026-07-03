@@ -74,6 +74,14 @@ def load_leaderboard_table(
 def build_app() -> gr.Blocks:
     with gr.Blocks(title="QuantScenarioBench Leaderboard") as demo:
         gr.Markdown("# QuantScenarioBench Leaderboard")
+        # Sorting (FR-38) is Gradio Dataframe's built-in, client-side
+        # column-header sort -- clicking a header reorders the displayed
+        # rows in the browser without a Python round-trip, and never
+        # touches the underlying data (Gradio's own docs: "sorting the
+        # columns in the browser will not affect the values passed to
+        # this function"). No bespoke sort algorithm or callback is
+        # introduced here (AD-27) -- interactive=False only disables
+        # cell editing, not this native sort affordance.
         table = gr.Dataframe(interactive=False, wrap=True)
         demo.load(fn=load_leaderboard_table, inputs=None, outputs=table)
     return demo
