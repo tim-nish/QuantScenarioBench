@@ -2,7 +2,7 @@
 title: Product Brief - QuantScenarioBench
 status: final
 created: 2026-06-30
-updated: 2026-06-30
+updated: 2026-07-03
 ---
 
 # Product Brief: QuantScenarioBench
@@ -76,9 +76,12 @@ Supporting criteria:
 
 If this works, QuantScenarioBench becomes the reference implementation for finance-scoped state-space simulation: the framework other researchers reach for, or build on, when they need a stochastic market model expressed as `randomness` / `latent_state` / `observation` / `metadata`. The model zoo grows past the initial three (SABR, jump-diffusion, and beyond, plus community-contributed models against the same state-space interface), and reference datasets — built on top of the framework, not separate from it — accumulate real usage as evidence the standardization actually took hold. Oracle labels mature from Monte Carlo interim to AD-derived ground truth across the model set, strengthening those reference datasets over time rather than redefining the framework itself.
 
+**Platform expansion (added 2026-07-03):** The long-term vision extends one layer further than the framework-plus-datasets picture above. QuantScenarioBench's endpoint is not just a source of published scenario data, but a Hugging Face-native platform for *evaluating* portfolio strategies against that data: every `BenchmarkResult` produced by the benchmark layer (see the PRD's Feature 4.8) is publishable, in a fixed schema, to a shared Hugging Face dataset repo, and those published records accumulate into a public Leaderboard comparing strategies — and, eventually, forecasting models — on the same standardized metrics and datasets. This is the same "standardization accumulates real usage as evidence" bet already stated above for reference datasets, applied one layer up to evaluation itself, not a separate ambition. A hosted Leaderboard *web UI* (a Hugging Face Space or equivalent) is part of this same long-term direction but is deliberately treated as a later phase, not a near-term commitment — see the PRD for the current phase boundary.
+
 ## Open Questions & Risks
 
 - **Oracle label fidelity is genuinely unresolved.** AD-through-paths for models without closed-form pricing is literature-supported but not yet proven out in this codebase; Monte Carlo interim labels carry their own variance/bias tradeoffs. This brief deliberately leaves the resolution to implementation, not because it's unimportant, but because it isn't decided yet.
 - **Reproducibility across JAX backends is a known sharp edge.** JAX/XLA numerics aren't guaranteed bit-identical across CPU/GPU/TPU; "reproducible" needs a precise, scoped definition before it becomes a tested claim.
 - **Solo-maintainer bandwidth against a multi-model roadmap.** The three-model, then-expanding scope is ambitious for what is currently a one-person open-source effort — the narrow, API-first v1 scope above exists specifically to manage that risk rather than front-load the full model zoo.
 - **Dataset generation and hosting cost at scale** is unestimated — large benchmark datasets (many scenarios × many models) may have non-trivial compute and storage costs once published.
+- **Leaderboard hosting is an ongoing operational commitment, not a one-time deliverable.** *(added 2026-07-03)* A published Evaluation Results repo is a bounded, one-time-per-run publishing cost, similar to dataset publishing above; a hosted Leaderboard *Space* is a live service someone has to keep running and paying for. This brief's solo-maintainer-bandwidth risk (above) applies to that ongoing cost specifically, which is why the Space is scoped as a later phase rather than bundled with Evaluation Results publishing.
