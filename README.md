@@ -2,7 +2,7 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21097248.svg)](https://doi.org/10.5281/zenodo.21097248)
 
-A JAX-native Python framework for generating reproducible stochastic market scenarios, with built-in export to Parquet and the Hugging Face Hub.
+A JAX-native Python framework for generating reproducible stochastic market scenarios and benchmarking portfolio strategies against them, with built-in export to Parquet and the Hugging Face Hub.
 
 ```python
 from quantscenariobench.api import simulate
@@ -19,16 +19,26 @@ print(scenario.observation.shape)    # (10000, 253)  — asset price paths
 print(scenario.latent_state.shape)   # (10000, 253)  — variance paths
 ```
 
+QuantScenarioBench is more than a published dataset — it's an end-to-end, Hugging Face-native pipeline:
+
+1. **Scenario generation** — reproducible price paths from established stochastic volatility models (`quantscenariobench.api`, `.models`)
+2. **Benchmark Core** — a shared interface, baselines, and metrics for scoring portfolio strategies against those Scenarios (`quantscenariobench.benchmark`)
+3. **Evaluation Results** — a versioned, JSON-native record of each benchmark run, derived from `BenchmarkResult` (`quantscenariobench.benchmark.evaluation`)
+4. **Leaderboard aggregation** — a ranked strategy × Benchmark Dataset table built from every published Evaluation Result (data only — no hosted UI yet, see [Roadmap](#roadmap))
+5. **Hugging Face-native workflow** throughout — datasets, dataset cards, and Evaluation Results all publish to and load from the Hub with the same functions used for local storage
+
 ---
 
 ## Why QuantScenarioBench?
 
-Quantitative finance research routinely benchmarks models against each other, but reproducible, openly published path datasets are rare. QuantScenarioBench is useful for model benchmarking, evaluation, stress testing, and general experimentation with stochastic volatility models, and makes it straightforward to:
+Quantitative finance research routinely benchmarks models against each other, but reproducible, openly published path datasets — and a standardized way to score strategies against them — are rare. QuantScenarioBench is useful for model benchmarking, evaluation, stress testing, and general experimentation with stochastic volatility models, and makes it straightforward to:
 
 - **Generate** large batches of price paths from established stochastic volatility models with a single call
 - **Compare** models on a shared schema — every `Scenario` has the same fields regardless of the model used
 - **Export** results to Parquet or publish directly to the Hugging Face Hub
 - **Reproduce** any result exactly — the same `(model, time_grid, n_paths, seed)` always produces bit-identical paths on the same computational backend
+- **Benchmark** portfolio strategies against generated Scenarios with a shared `run_benchmark()` pipeline and standardized performance metrics
+- **Publish and aggregate** benchmark runs as versioned Evaluation Results, ranked into a Leaderboard table (see [Roadmap](#roadmap) — the aggregation is implemented today; a hosted UI is planned)
 
 ---
 
@@ -38,13 +48,12 @@ Quantitative finance research routinely benchmarks models against each other, bu
 pip install quantscenariobench
 ```
 
-**Requirements:** Python ≥ 3.11, JAX ≥ 0.4.38.
+**Requirements:** Python ≥ 3.11. Core dependencies — `jax`, `diffrax`, `equinox`, `pyarrow`, `scipy` (Optimizer Solver Layer for GMV's long-only path and CVaR Optimization), and `huggingface_hub` (Hugging Face Hub publishing, both datasets and Evaluation Results) — install automatically; there is no separate opt-in step for Hugging Face support.
 
-For optional Hugging Face publishing:
+For development (running the test suite, loading datasets in examples):
 
 ```bash
-pip install "quantscenariobench[dev]"   # includes datasets, pandas
-pip install huggingface_hub             # for publish_to_hub
+pip install "quantscenariobench[dev]"   # adds pytest, pandas, datasets
 ```
 
 ---
@@ -212,19 +221,109 @@ For research use, generate your own dataset with your chosen horizon, time grid,
 
 ---
 
+## Benchmark Core
+
+`quantscenariobench.benchmark` scores portfolio strategies against Scenarios using a shared pipeline, mirroring the Market Model layer's interface-plus-conformance-suite design.
+
+```python
+from quantscenariobench.benchmark.returns import derive_returns, compose_returns
+from quantscenariobench.benchmark.strategies import EqualWeight, GlobalMinimumVariance, CVaROptimization
+from quantscenariobench.benchmark.runner import run_benchmark
+
+# One Scenario per asset, all sharing the same TimeGrid (a single path per asset)
+returns = compose_returns([scenario_a, scenario_b, scenario_c])   # shape (t, n_assets)
+historical_returns, evaluation_returns = returns[:126], returns[126:]
+
+strategy = EqualWeight()
+result = run_benchmark(strategy, historical_returns, evaluation_returns)
+
+print(result.metrics)
+# {'sharpe_ratio': ..., 'sortino_ratio': ..., 'max_drawdown': ..., 'final_wealth_factor': ...}
+```
+
+- **Portfolio Optimizer Interface** (`quantscenariobench.benchmark.interface`) — `BaselineStrategy` (`allocate(historical_returns)`) and `ForecastOptimizer` (`allocate(historical_returns, forecast)`), both `equinox.Module` ABCs, plus a validated `PortfolioWeights` type (long-only, sums to 1).
+- **Traditional baselines** (`quantscenariobench.benchmark.strategies`) — `EqualWeight`, `GlobalMinimumVariance(long_only=...)`, `CVaROptimization(confidence_level=...)`.
+- **Metrics** (`quantscenariobench.benchmark.metrics`) — `sharpe_ratio`, `sortino_ratio`, `max_drawdown`, `final_wealth_factor`, assembled in `DEFAULT_METRICS`; all pure `jax.numpy` functions with defined sentinel behavior on degenerate input (e.g. zero variance).
+- **`run_benchmark()`** (`quantscenariobench.benchmark.runner`) fits the strategy once (static buy-and-hold), applies its weights across `evaluation_returns`, and returns a JSON-serializable `BenchmarkResult` (`strategy_name`, `strategy_parameters`, `metrics`, `asset_scenario_ids`, `time_grid_reference`, `library_version`, `generated_at`).
+- A conformance test suite (`quantscenariobench.benchmark.testing`) verifies a custom `BaselineStrategy`/`ForecastOptimizer` implementation against the interface, with zero changes to `run_benchmark()`.
+
+### Implementing a custom strategy
+
+```python
+import jax.numpy as jnp
+from quantscenariobench.benchmark.interface import BaselineStrategy, PortfolioWeights
+
+class MyStrategy(BaselineStrategy):
+    def allocate(self, historical_returns):
+        n = historical_returns.shape[1]
+        return PortfolioWeights(jnp.full((n,), 1.0 / n), n_assets=n)
+```
+
+Pass it directly to `run_benchmark()` — no other integration required.
+
+---
+
+## Evaluation Results & Leaderboard
+
+> **Current scope:** this pipeline publishes and **aggregates** Evaluation Results into a ranked table. There is no hosted or public leaderboard UI yet — see [Roadmap](#roadmap).
+
+`quantscenariobench.benchmark.evaluation` turns a `BenchmarkResult` into a versioned, publishable record, and reads any collection of them back into a ranked comparison table.
+
+```python
+from quantscenariobench.benchmark.evaluation import (
+    to_evaluation_result,
+    write_evaluation_result,
+    publish_evaluation_results,
+    load_evaluation_results,
+    aggregate_evaluation_results,
+)
+
+# 1. Convert a BenchmarkResult (from run_benchmark()) into an EvaluationResult
+evaluation_result = to_evaluation_result(result)
+
+# 2. Store it locally — one timestamped file per run, organized by dataset/strategy
+write_evaluation_result(evaluation_result, root="results")
+
+# 3. Publish it to a shared Hugging Face dataset repo (append-only)
+publish_evaluation_results([evaluation_result], "my-org/qsb-evaluation-results", token="hf_...")
+
+# 4. Aggregate every locally stored (or downloaded) result into a leaderboard table
+results = load_evaluation_results("results")
+leaderboard = aggregate_evaluation_results(results)
+print(leaderboard)
+# [{'strategy': 'EqualWeight', 'benchmark_dataset': '...', 'sharpe_ratio': ..., ...}, ...]
+```
+
+- **`EvaluationResult`** — a fixed, JSON-native schema (`schema_version`, `result_id`, `strategy`, `benchmark_dataset`, `metrics` as an ordered `{name, value}` list, `library_version`, `generated_at`), derived from `BenchmarkResult` via the pure `to_evaluation_result()` function. `BenchmarkResult` itself is unchanged — `EvaluationResult` is a separate, additive publication-layer type.
+- **Local storage** (`write_evaluation_result`) writes one timestamped JSON file per run under `results/<dataset>/<strategy>/`; nothing is ever overwritten.
+- **Hugging Face publishing** (`publish_evaluation_results`, `generate_evaluation_results_card`) uploads results to a shared dataset repo and regenerates a summary README/card after every publish.
+- **Leaderboard aggregation** (`aggregate_evaluation_results`, `load_evaluation_results`, `load_evaluation_results_from_hub`) is a generic reader — no strategy- or dataset-specific branching — that returns a plain `list[dict]`: one row per strategy × Benchmark Dataset, the most recently generated result winning ties. It has no UI framework dependency; render it with `pandas.DataFrame(leaderboard)` or however you like.
+
+---
+
 ## Architecture
 
 ```
 quantscenariobench/
-├── api/           simulate() — single public entry point
-├── interface/     MarketModel ABC, Scenario, TimeGrid, Metadata
-├── models/        BlackScholes, Heston, RoughBergomi
-├── solver/        Euler-Maruyama SDE solver (diffrax / lineax)
-├── export/        export_parquet(), generate_dataset_card(), publish_to_hub()
-└── testing/       Conformance suite for custom model authors
+├── api/          simulate() — single public entry point
+├── interface/    MarketModel ABC, Scenario, TimeGrid, Metadata
+├── models/       BlackScholes, Heston, RoughBergomi
+├── solver/       Euler-Maruyama SDE solver (diffrax / lineax)
+├── export/       export_parquet(), generate_dataset_card(), publish_to_hub()
+├── testing/      Conformance suite for custom model authors
+└── benchmark/
+    ├── interface/    BaselineStrategy/ForecastOptimizer ABCs, PortfolioWeights, BenchmarkResult
+    ├── strategies/   EqualWeight, GlobalMinimumVariance, CVaROptimization
+    ├── metrics/      sharpe_ratio, sortino_ratio, max_drawdown, final_wealth_factor
+    ├── returns/      derive_returns(), compose_returns()
+    ├── solver/       scipy-backed Optimizer Solver Layer (GMV long-only, CVaR)
+    ├── runner/       run_benchmark() — single public entry point
+    ├── evaluation/   EvaluationResult, to_evaluation_result(), local storage,
+    │                 HF publishing, Leaderboard aggregation
+    └── testing/      Conformance suite for custom strategy authors
 ```
 
-**Dependency rule:** `models` and `export` import only from `interface`. The solver and API layers compose these. This keeps any custom model implementation minimal.
+**Dependency rule:** `models` and `export` import only from `interface`. The solver and API layers compose these. This keeps any custom model implementation minimal. The `benchmark` subpackage mirrors this rule one layer up: `strategies`/`metrics`/`returns` import only from `benchmark.interface` (plus `benchmark.solver` where noted), and only `benchmark.runner` composes a caller-supplied strategy — no benchmark module reaches back into `models` or the scenario-generation `solver`.
 
 ### Implementing a custom model
 
@@ -262,7 +361,22 @@ pip install -e ".[dev]"
 pytest
 ```
 
-The test suite covers closed-form price validation (Gil-Pélaez inversion for Heston; Black-Scholes formula for GBM), statistical properties (skew monotonicity in H for rBergomi), Parquet round-trips, and dataset card conformance.
+The test suite covers closed-form price validation (Gil-Pélaez inversion for Heston; Black-Scholes formula for GBM), statistical properties (skew monotonicity in H for rBergomi), Parquet round-trips, and dataset card conformance — plus the Benchmark Core (metrics and baselines validated against hand-derived reference values, Portfolio Optimizer conformance suite) and the Evaluation Results pipeline (`BenchmarkResult` → `EvaluationResult` transform, local storage, and Leaderboard aggregation).
+
+---
+
+## Roadmap
+
+| Capability | Status |
+|---|---|
+| Scenario generation (Black-Scholes, Heston, Rough Bergomi) | Shipped — v1.0 |
+| Parquet export & Hugging Face dataset publishing | Shipped — v1.0 |
+| Benchmark Core (Portfolio Optimizer Interface, baselines, metrics, `run_benchmark()`) | Shipped — v1.1 |
+| EvaluationResult pipeline (transform, local storage, HF publishing) | Shipped — v1.1 |
+| Leaderboard **aggregation** (ranked table from published results, no UI) | Shipped — v1.1 |
+| Hugging Face Space — hosted Gradio Leaderboard **UI** | Planned — v1.2 |
+
+**v1.1 gives you the data, not the dashboard:** `aggregate_evaluation_results()` returns a plain `list[dict]` you can put in a `pandas.DataFrame`, a notebook, or your own app. There is no public, hosted leaderboard page yet — that is the explicit goal of the v1.2 Hugging Face Space.
 
 ---
 
