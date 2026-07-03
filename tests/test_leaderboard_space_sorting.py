@@ -45,12 +45,16 @@ def _load_app_module():
 
 def test_app_has_no_bespoke_sort_implementation():
     src = _app_path().read_text()
-    forbidden = ("sort_values(", "def sort", ".sort(", "sorted(")
+    # Scoped to reimplementing the *table's* sort order specifically —
+    # not a blanket ban on Python's sorted()/list.sort(), which Story
+    # 8.3's filter-choice population legitimately uses for presenting
+    # dropdown options alphabetically (an unrelated UI concern).
+    forbidden = ("sort_values(", "def sort_leaderboard", "def sort_table")
     for term in forbidden:
         assert term not in src, (
-            f"app.py must not reimplement sorting ('{term}' found) — FR-38 is "
-            "satisfied by Gradio Dataframe's native column-header sort, not "
-            "custom Python logic (AD-27)"
+            f"app.py must not reimplement table sorting ('{term}' found) — "
+            "FR-38 is satisfied by Gradio Dataframe's native column-header "
+            "sort, not custom Python logic (AD-27)"
         )
 
 
