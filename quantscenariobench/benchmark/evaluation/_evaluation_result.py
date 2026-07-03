@@ -51,3 +51,21 @@ class EvaluationResult:
     metrics: list[EvaluationMetric]
     library_version: str
     generated_at: str
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "EvaluationResult":
+        """Reconstruct an EvaluationResult from its dataclasses.asdict() shape.
+
+        The exact inverse of json.loads(json.dumps(dataclasses.asdict(result))),
+        needed by any reader of a published EvaluationResult (e.g. Story 7.5's
+        Leaderboard aggregation).
+        """
+        return cls(
+            schema_version=data["schema_version"],
+            result_id=data["result_id"],
+            strategy=EvaluationStrategy(**data["strategy"]),
+            benchmark_dataset=EvaluationBenchmarkDataset(**data["benchmark_dataset"]),
+            metrics=[EvaluationMetric(**m) for m in data["metrics"]],
+            library_version=data["library_version"],
+            generated_at=data["generated_at"],
+        )
