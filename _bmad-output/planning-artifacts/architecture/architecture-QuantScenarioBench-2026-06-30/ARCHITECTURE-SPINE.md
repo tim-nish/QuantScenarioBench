@@ -3,12 +3,12 @@ name: 'QuantScenarioBench'
 type: architecture-spine
 purpose: build-substrate
 altitude: initiative
-paradigm: 'Strategy-pattern plugin core within a linear pipeline (Market Model -> Solver Layer -> Scenario -> generic Export)'
-scope: 'QuantScenarioBench v1 - finance-scoped JAX market scenario simulation framework: the State-Space Interface, the simulation/solver boundary, and the dataset export boundary'
+paradigm: 'Strategy-pattern plugin core within a linear pipeline (Market Model -> Solver Layer -> Scenario -> generic Export), extended by a second, structurally identical Strategy-pattern pipeline for portfolio benchmarking (Portfolio Optimizer -> Optimizer Solver Layer -> Benchmark Runner -> BenchmarkResult), and by a third, smaller publication-layer transform (BenchmarkResult -> EvaluationResult -> generic local/HF storage -> generic Leaderboard aggregation) with no Strategy-pattern extension point of its own'
+scope: 'QuantScenarioBench v1 - finance-scoped JAX market scenario simulation framework: the State-Space Interface, the simulation/solver boundary, the dataset export boundary, the Portfolio Optimizer Interface and Benchmark Runner boundary (added 2026-07-02), and (added 2026-07-03) the Evaluation Results publication boundary'
 status: final
 created: '2026-06-30'
-updated: '2026-06-30'
-binds: ['PRD Feature 4.1 Core Simulation API', 'PRD Feature 4.2 v1 Market Model Zoo', 'PRD Feature 4.3 State-Space Extensibility Contract', 'PRD Feature 4.4 Benchmark Dataset Export & Publishing']
+updated: '2026-07-03'
+binds: ['PRD Feature 4.1 Core Simulation API', 'PRD Feature 4.2 v1 Market Model Zoo', 'PRD Feature 4.3 State-Space Extensibility Contract', 'PRD Feature 4.4 Benchmark Dataset Export & Publishing', 'PRD Feature 4.5 Portfolio Performance Metrics', 'PRD Feature 4.6 Traditional Baseline Strategies', 'PRD Feature 4.7 Portfolio Optimizer Extensibility Contract', 'PRD Feature 4.8 Benchmark Runner & Results', 'PRD Feature 4.9 Evaluation Results & Leaderboard']
 sources: ['_bmad-output/planning-artifacts/prds/prd-QuantScenarioBench-2026-06-30/prd.md', '_bmad-output/planning-artifacts/prds/prd-QuantScenarioBench-2026-06-30/addendum.md']
 companions: []
 ---
@@ -26,6 +26,20 @@ Layer → namespace mapping:
 - `quantscenariobench.api` — `simulate()`, the public orchestrator.
 - `quantscenariobench.export` — Parquet/Hugging Face export, generic over `Scenario`.
 - `quantscenariobench.testing` — the State-Space Interface conformance suite and its test-only dummy Market Model (FR-11); never imported by non-test code.
+
+**Benchmark layer (added 2026-07-02): the same paradigm applied a second time.** A Traditional Baseline or Forecast Optimizer is a typed configuration object satisfying the Portfolio Optimizer Interface (the Strategy, mirroring `MarketModel`); the Optimizer Solver Layer is the single component that turns a constrained-allocation strategy's problem into weights, currently via `scipy`; `run_benchmark()` is the orchestrator that wires a strategy + returns/Scenarios into a `BenchmarkResult`. The two pipelines share only their entry point for scenario data (`Scenario`, via `quantscenariobench.interface`) — the benchmark layer never imports `quantscenariobench.models` or `quantscenariobench.solver` directly (AD-19). Like the rest of the project, the benchmark layer is JAX-native by default (AD-25); the Optimizer Solver Layer's `scipy` dependency is a single, deliberately bounded, swappable exception — not license for non-JAX tooling to spread elsewhere in `quantscenariobench.benchmark.*`.
+
+- `quantscenariobench.benchmark.interface` — the Portfolio Optimizer Interface (`BaselineStrategy`/`ForecastOptimizer` ABCs), `PortfolioWeights`, `BenchmarkResult`.
+- `quantscenariobench.benchmark.strategies` — concrete Traditional Baselines (`EqualWeight`, `GlobalMinimumVariance`, `CVaROptimization`), each an `equinox.Module` satisfying `BaselineStrategy`.
+- `quantscenariobench.benchmark.metrics` — the four v1 Metrics (Sharpe, Sortino, Maximum Drawdown, Final Wealth Factor) as plain `MetricFn` functions.
+- `quantscenariobench.benchmark.returns` — derives a return series from a `Scenario`'s `observation` (FR-28); the only benchmark-layer module that reads `quantscenariobench.interface.Scenario` directly.
+- `quantscenariobench.benchmark.solver` — the internal Optimizer Solver Layer; the only module that imports `scipy`.
+- `quantscenariobench.benchmark.runner` — `run_benchmark()`, the public benchmark-layer orchestrator.
+- `quantscenariobench.benchmark.testing` — the Portfolio Optimizer conformance suite and its test-only dummy `ForecastOptimizer` (FR-25); never imported by non-test code.
+
+**Evaluation Results layer (added 2026-07-03): a third, smaller paradigm — publication, not a new Strategy.** Unlike the two pipelines above, this layer has no swappable Strategy-pattern extension point: every `BenchmarkResult` is transformed into an `EvaluationResult` by exactly one fixed, pure function (AD-26), which is then written locally, published to the Hub, and aggregated into a Leaderboard — the same generic-consumer posture `quantscenariobench.export` already holds for `Scenario` (AD-5), applied one layer up to `BenchmarkResult`. This layer depends on `quantscenariobench.benchmark.interface` (to read `BenchmarkResult`) only; it never depends on `strategies`, `solver`, `metrics`, `returns`, or `runner` directly, mirroring AD-19's dependency posture.
+
+- `quantscenariobench.benchmark.evaluation` — `EvaluationResult` (AD-26), `to_evaluation_result()` (FR-31), local storage (FR-32), Hugging Face publishing (FR-33), and Leaderboard aggregation (FR-34). A hosted Leaderboard UI (PRD Feature 4.10) is an explicit future phase and is not part of this module — see Deferred.
 
 ## Invariants & Rules
 
@@ -85,21 +99,105 @@ Layer → namespace mapping:
 
 ### AD-10 — Correctness-check references are independently implemented, never borrowed from a bundled quant library
 
-- **Binds:** FR-7, FR-8, FR-9 correctness checks; `quantscenariobench.testing`.
+- **Binds:** FR-7, FR-8, FR-9 correctness checks; `quantscenariobench.testing`. **Amended 2026-07-02:** also binds the v1 Metrics (FR-16–FR-19) and Traditional Baselines (FR-20–FR-22) correctness checks, per the PRD's explicit extension of this convention to Features 4.5/4.6 (SM-7).
 - **Prevents:** a correctness check silently depending on `tf-quant-finance`, `QuantLib`, or another general-purpose quant library as its reference implementation — making the project's own pricing/sensitivity logic an unverified pass-through rather than an independent implementation (the brief's "not a thin wrapper" framing, addendum point 2).
-- **Rule:** Every closed-form, semi-closed-form, or statistical reference value used to validate a Market Model (Black-Scholes analytic price, Heston characteristic-function price, rBergomi statistical/aBergomi-based sanity check) is implemented within QuantScenarioBench's own code. No correctness check imports a pricing formula from a third-party quant library as its source of truth.
+- **Rule:** Every closed-form, semi-closed-form, or statistical reference value used to validate a Market Model (Black-Scholes analytic price, Heston characteristic-function price, rBergomi statistical/aBergomi-based sanity check) is implemented within QuantScenarioBench's own code. No correctness check imports a pricing formula from a third-party quant library as its source of truth. **Amended 2026-07-02:** the same rule applies to Metrics and Traditional Baselines — no correctness test for Sharpe/Sortino/Max Drawdown/Final Wealth Factor, Equal Weight, GMV, or CVaR Optimization imports its expected/reference value from `empyrical`, `quantstats`, `PyPortfolioOpt`, `Riskfolio-Lib`, or any other portfolio-analytics library; reference values are hand-derived or independently implemented within QuantScenarioBench's own test code, even though `scipy` (AD-14) is used for the *production* solver path.
 
 ### AD-11 — Public API stability follows semantic versioning, independent of dataset versioning
 
-- **Binds:** `simulate()`, `Scenario`, the State-Space Interface (`MarketModel`, `TimeGrid`); resolves the PRD's Cross-Cutting NFR "Public API stability policy."
+- **Binds:** `simulate()`, `Scenario`, the State-Space Interface (`MarketModel`, `TimeGrid`); resolves the PRD's Cross-Cutting NFR "Public API stability policy." **Amended 2026-07-02:** also binds `BaselineStrategy`, `ForecastOptimizer`, and the `BenchmarkResult` schema.
 - **Prevents:** a breaking change to the public API shipping in a non-major library release; conflating library version bumps with dataset version bumps (FR-14 already fixes datasets as independently versioned — this AD is the library-side mirror of that same discipline).
-- **Rule:** Any backward-incompatible change to `simulate()`'s signature, `Scenario`'s field set, or the `MarketModel`/`TimeGrid` contract requires a major version bump of the `quantscenariobench` package, tracked separately from any `dataset_version` value in `Metadata` (AD-8).
+- **Rule:** Any backward-incompatible change to `simulate()`'s signature, `Scenario`'s field set, or the `MarketModel`/`TimeGrid` contract requires a major version bump of the `quantscenariobench` package, tracked separately from any `dataset_version` value in `Metadata` (AD-8). **Amended 2026-07-02:** the same major-version-bump requirement applies to a backward-incompatible change to `BaselineStrategy`'s or `ForecastOptimizer`'s `allocate()` signature, or to the `BenchmarkResult` schema (FR-29) — the Portfolio Optimizer Interface and `BenchmarkResult` are first-class public API surface, not internal detail.
 
 ### AD-12 — `TimeGrid` is an explicit, ordered time-point sequence, not a generative spec
 
 - **Binds:** FR-3; every Market Model's `_drift`/`_diffusion` signature (AD-4) and the Solver Layer's `TimeGrid`→`SaveAt` mapping (AD-4).
 - **Prevents:** one Market Model accepting `TimeGrid` as a `(start, stop, steps)`-equivalent spec it expands internally, while another expects pre-expanded points — silently disagreeing on what `TimeGrid` "is."
 - **Rule:** `TimeGrid` always carries an explicit, already-ordered array of time points (supporting non-uniform spacing per FR-3); no Market Model or the Solver Layer accepts or produces an alternate `(start, stop, steps)` representation.
+
+### AD-13 — Portfolio Optimizer Interface is an `equinox.Module` ABC, split into `BaselineStrategy` and `ForecastOptimizer`
+
+- **Binds:** every Traditional Baseline and future Forecast Optimizer; `quantscenariobench.benchmark.interface`, `quantscenariobench.benchmark.strategies`. Resolves PRD Open Question 15.
+- **Prevents:** a structural-typing-only Protocol contract that skips `eqx`'s native pytree/jit integration (breaking AD-6's project-wide convention); a strategy implementation inventing its own ad hoc `allocate`-equivalent signature.
+- **Rule:** `BaselineStrategy(eqx.Module, ABC)` fixes one abstract method, `allocate(historical_returns: Float[Array, "t n"]) -> PortfolioWeights`. `ForecastOptimizer(eqx.Module, ABC)` fixes `allocate(historical_returns: Float[Array, "t n"], forecast: Float[Array, "n"]) -> PortfolioWeights` — `forecast`'s shape is fixed by AD-21, not left as an unconstrained `PyTree`. Every concrete strategy — Equal Weight, GMV, CVaR Optimization, and any future Forecast Optimizer — subclasses one of these two ABCs and implements only `allocate`; none registers itself as a pytree by hand.
+
+### AD-14 — Optimizer Solver Layer isolates the non-JAX numerical solver behind one boundary
+
+- **Binds:** `GlobalMinimumVariance` and `CVaROptimization` (FR-21, FR-22); `quantscenariobench.benchmark.solver`. Resolves PRD Open Question 10. Its non-JAX-native scope is deliberately bounded by AD-25.
+- **Prevents:** each constrained-optimization strategy independently choosing an incompatible solver library or constraint convention; a non-JAX dependency leaking into strategy code that should stay swappable; two strategies producing weights under different constraint semantics without a shared default; two implementers of `GlobalMinimumVariance` disagreeing on when the closed-form path applies versus the solver path, or on how a JAX array crosses the boundary into `scipy` and back.
+- **Rule:** `quantscenariobench.benchmark.solver` is the only module that imports `scipy`; it is responsible for converting a JAX array to a plain NumPy array on the way in and back to a JAX array on the way out — no other benchmark module performs this conversion. `GlobalMinimumVariance` takes a required `long_only: bool` constructor argument (not an implicit runtime toggle) that selects between two fixed paths: `long_only=False` uses `jax.numpy.linalg` directly (closed-form covariance inversion, no solver call, fully JAX-native); `long_only=True` calls into `quantscenariobench.benchmark.solver` (`scipy.optimize.minimize`, SLSQP). `CVaROptimization`'s Rockafellar–Uryasev linear program always calls into `quantscenariobench.benchmark.solver` (`scipy.optimize.linprog`). Neither strategy imports `scipy` directly — both call `quantscenariobench.benchmark.solver.solve_allocation(...)`, whose *internal* implementation is free to change (e.g. to a future JAX-native QP/LP solver, AD-25) without either strategy class changing. All v1 constrained baselines default to long-only (`PortfolioWeights`' non-negativity invariant, AD-20, applies universally — this is stronger than a per-strategy convention). `[ASSUMPTION: long-only chosen as the v1 default — resolves PRD Open Question 10's constraint dimension; short positions are a deferred extension, not confirmed by user]` A solver call that fails to converge raises (e.g. a `QuantScenarioBenchSolverError`) rather than silently returning a degenerate or unconverged weight vector. `EqualWeight` needs no solver and computes its weights directly, entirely in `jax.numpy` (AD-25).
+
+### AD-15 — CVaR confidence level is an explicit, required, recorded parameter
+
+- **Binds:** `CVaROptimization` (FR-22); resolves PRD Open Question 11.
+- **Prevents:** two call sites silently using different confidence levels while assuming their `BenchmarkResult`s are comparable; a hidden internal default drifting across versions without appearing in the recorded strategy parameters.
+- **Rule:** `CVaROptimization.confidence_level` is a required constructor argument — never an internal hardcoded default. The v1 default value for callers who don't specify one explicitly is `0.95`, confirmed by the user on 2026-07-02. The value is always part of the strategy's recorded identity/parameters (FR-22), so a `BenchmarkResult` stays reproducible per AD-17.
+
+### AD-16 — Return-series derivation is one function, one convention
+
+- **Binds:** `quantscenariobench.benchmark.returns`; Metrics (Feature 4.5), Traditional Baselines/Portfolio Optimizer Interface (Feature 4.6/4.7), and the Benchmark Runner (Feature 4.8), all of which consume its output. Resolves PRD Open Question 16.
+- **Prevents:** a Scenario from `simulate()` and a Scenario loaded from a published Benchmark Dataset being converted to "returns" via different formulas, silently making cross-source or cross-model portfolios non-comparable; the same conversion logic being reimplemented (and drifting) in more than one place.
+- **Rule:** Returns are simple/arithmetic period returns, `return(t) = (price(t) - price(t-1)) / price(t-1)`, computed once per `TimeGrid` step directly from `Scenario.observation` — no resampling to a different frequency in v1. Confirmed by the user on 2026-07-02: arithmetic return (not log return), per-`TimeGrid`-step frequency. Implemented in exactly one function, `quantscenariobench.benchmark.returns.derive_returns(scenario) -> Float[Array, "t"]`, written entirely in `jax.numpy` and `jit`-compatible (AD-25); the Benchmark Runner calls it and no other module reimplements the conversion inline.
+
+### AD-17 — `BenchmarkResult` is a plain, JSON-native dataclass, not an `equinox.Module`
+
+- **Binds:** `quantscenariobench.benchmark.runner`'s return type; FR-29.
+- **Prevents:** a contributor assuming AD-6's project-wide `eqx.Module` convention extends to `BenchmarkResult` and wrapping it in a traced pytree it has no use for — a `BenchmarkResult` is a terminal artifact, never re-traced through `jit`/`vmap`, unlike `Scenario` (AD-2).
+- **Rule:** `BenchmarkResult` is a plain immutable Python dataclass (`@dataclasses.dataclass(frozen=True)`) with only JSON-native field types (`str`, `float`, `int`, `dict`, `list`) — no JAX arrays, no `eqx.Module` fields. Its JSON path is a direct structural dump (`dataclasses.asdict` + `json.dumps`), not a pytree-flatten — contrast with AD-5's `Scenario`-flattening export path.
+
+### AD-18 — Metrics are pure functions the Runner calls generically, never by name
+
+- **Binds:** `quantscenariobench.benchmark.metrics`; `quantscenariobench.benchmark.runner`.
+- **Prevents:** adding a new Metric requiring an edit inside the Runner's orchestration logic (a per-metric `if`/branch) — the direct failure mode this update's extensibility priority is meant to close off.
+- **Rule:** Every Metric matches `MetricFn = Callable[[Float[Array, "t"]], float]` — a Portfolio Return series in, a scalar out — defined in `quantscenariobench.benchmark.metrics`; none is a method on `BenchmarkRunner`/`run_benchmark`, and none takes anything beyond the return series. Every `MetricFn` is written entirely in `jax.numpy`, `jit`-compatible, and never calls `scipy` or plain NumPy (AD-25) — Sharpe, Sortino, Maximum Drawdown, and Final Wealth Factor all need nothing beyond array reductions, so none of the four v1 Metrics needs the Optimizer Solver Layer's non-JAX exception. Every `MetricFn` carries a `.name: str` attribute. `run_benchmark()` accepts a metrics registry — an explicit ordered `Sequence[MetricFn]` (default: the four v1 `MetricFn`s in a fixed tuple, never a `dict`) — as an argument and iterates over it generically; it raises at call time if two entries in the registry share a `.name`, rather than silently allowing one to shadow the other. A new Metric is added by writing a new `MetricFn` and adding it to the registry passed in — zero changes to `quantscenariobench.benchmark.runner`'s source. Sharpe and Sortino (FR-16, FR-17) return a fixed sentinel value of `0.0` when their denominator (return standard deviation / downside deviation) is exactly zero, rather than raising or returning `NaN`/`inf`.
+
+### AD-19 — Benchmark-layer dependency direction mirrors AD-9
+
+- **Binds:** all `quantscenariobench.benchmark.*` modules.
+- **Prevents:** a Traditional Baseline importing the Optimizer Solver Layer's caller (the Runner) or another strategy directly, bypassing the Portfolio Optimizer Interface as the sole integration point (the same failure mode AD-9 prevents for Market Models); the benchmark-layer conformance suite testing something other than the interface contract itself; a benchmark-layer module reaching back into the unrelated scenario-generation Strategy/Solver (`quantscenariobench.models`/`quantscenariobench.solver`).
+- **Rule:** see diagram. `quantscenariobench.benchmark.strategies` may import only `quantscenariobench.benchmark.interface`, `quantscenariobench.benchmark.solver`, and `equinox` — never `quantscenariobench.benchmark.runner` or `quantscenariobench.benchmark.testing`. `quantscenariobench.benchmark.metrics` and `quantscenariobench.benchmark.returns` depend on nothing benchmark-specific beyond plain arrays / `quantscenariobench.interface` (the latter, only to read `Scenario.observation`) — neither imports `strategies` or `runner`. `quantscenariobench.benchmark.testing` may import only `quantscenariobench.benchmark.interface` (+ `equinox`, test tooling) — never `strategies` or `runner`; its dummy `ForecastOptimizer` is defined inside `testing` itself (mirrors AD-9's treatment of the scenario-generation dummy Market Model). Only `quantscenariobench.benchmark.runner` may import concrete strategies, and only as caller-supplied arguments — it never hardcodes one. No `quantscenariobench.benchmark.*` module imports `quantscenariobench.models` or `quantscenariobench.solver`; the only connection to scenario generation is a `Scenario` flowing in via `quantscenariobench.interface`, already common ground with the rest of the package.
+
+### AD-20 — `PortfolioWeights` is a validated value type, not a per-strategy convention
+
+- **Binds:** every `BaselineStrategy`/`ForecastOptimizer.allocate()` return value; every consumer of `PortfolioWeights` (Metrics, the Benchmark Runner).
+- **Prevents:** a strategy returning a technically-`allocate()`-conformant but leveraged, negative-weight, or non-normalized vector that a Metric or the Runner silently mis-scores — the exact "compliant but incompatible" gap the adversarial review constructed by noting AD-14's long-only rule bound only `GlobalMinimumVariance`/`CVaROptimization`, not `EqualWeight` or a future `ForecastOptimizer`.
+- **Rule:** `PortfolioWeights` is `Float[Array, "n"]` with three invariants enforced at construction (not left to strategy discipline): entries sum to `1.0` within `1e-6` tolerance, every entry is `>= 0` (long-only, universal for v1 — not just for the constrained baselines named in AD-14), and `n` equals the number of constituent assets in the call. A strategy whose internal computation would violate any of these raises rather than returning a malformed `PortfolioWeights`.
+
+### AD-21 — `ForecastOptimizer.forecast` is a fixed-shape point forecast
+
+- **Binds:** `ForecastOptimizer` (FR-24); any future concrete Forecast Optimizer (PatchTST, iTransformer, TimeMixer wrappers, or otherwise).
+- **Prevents:** two `ForecastOptimizer` implementers independently choosing incompatible `forecast` shapes/semantics (e.g. one a point forecast, another a distributional/quantile forecast) while both satisfy AD-13's signature to the letter — the exact gap the adversarial review constructed, which would defeat this update's "plug in a new Forecast Model with minimal changes" goal.
+- **Rule:** `forecast` is `Float[Array, "n"]` — one predicted next-period return per constituent asset (a point forecast), matching `historical_returns`' asset ordering. Distributional or quantile forecasts are out of scope for v1's `ForecastOptimizer`; a future need for them is a new, parallel interface, not a silent reinterpretation of this shape (see Deferred).
+
+### AD-22 — Multi-asset composition requires aligned `TimeGrid`s and price-series `Scenario.observation`
+
+- **Binds:** `quantscenariobench.benchmark.runner` (FR-26); `quantscenariobench.benchmark.returns` (FR-28).
+- **Prevents:** two compliant implementations of "stack N Scenarios into a returns matrix" silently disagreeing on time alignment (one requiring equal-length `TimeGrid`s, another padding/truncating mismatched ones) — the multi-asset assembly rule the PRD's FR-26 required but left unspecified; and a `derive_returns` caller assuming `Scenario.observation` is always a scalar, strictly-positive price series when AD-1/AD-2/AD-4 never actually fix that semantic for every possible Market Model.
+- **Rule:** `run_benchmark()` requires every constituent Scenario in a multi-asset call to carry an identical `TimeGrid` (same length, same time points); a mismatch raises before any return derivation is attempted — no implicit padding, truncation, or resampling to reconcile misaligned grids. `quantscenariobench.benchmark.returns.derive_returns` (AD-16) requires `Scenario.observation` to be a one-dimensional, strictly-positive price series; a Market Model whose `observation` is not of this shape is not usable as a benchmark-layer asset in v1 — this is a new constraint the benchmark layer imposes on `Scenario.observation` beyond what Feature 4.1–4.3 require of it.
+
+### AD-23 — Strategy dispatch is by `isinstance`; allocation runs once per `run_benchmark()` call against a caller-supplied window split
+
+- **Binds:** `quantscenariobench.benchmark.runner` (FR-27).
+- **Prevents:** two implementers of the Runner's "call the right `allocate()`" logic diverging (one `isinstance`-branching, another silently widening `BaselineStrategy.allocate()`'s signature to accept an optional forecast) — the dispatch-mechanism gap the adversarial review found; and the PRD's confirmed FR-27 default (fit once, static buy-and-hold, lookback window from the same Scenario) having zero representation anywhere in the spine, as the rubric and reconciliation reviews both flagged as the update's most significant gap.
+- **Rule:** `run_benchmark()` dispatches via `isinstance(strategy, ForecastOptimizer)`: if true, it calls `strategy.allocate(historical_returns, forecast)`, requiring a `forecast` argument to have been supplied by the caller; otherwise it calls `strategy.allocate(historical_returns)` and rejects a caller-supplied `forecast` as an error. `run_benchmark()` takes two explicit, caller-supplied return-series arguments — `historical_returns` (the lookback/fit window) and `evaluation_returns` (the scored window) — rather than inferring a split point internally; per FR-27, both are drawn from the same Scenario(s) in v1. `allocate()` is called exactly once per `run_benchmark()` call, and the resulting `PortfolioWeights` are applied unchanged across the entire `evaluation_returns` window — no intra-run refitting or rebalancing.
+
+### AD-24 — `BenchmarkResult`'s minimum guaranteed field set is fixed
+
+- **Binds:** `quantscenariobench.benchmark.runner`'s return value; FR-29. Resolves PRD Open Question 14 — the one open item the PRD handed to Architecture that AD-8 already had a direct precedent for (Metadata's minimum field set) but which this update initially left unfixed.
+- **Prevents:** two compliant `BenchmarkResult` producers disagreeing on shape (e.g. nested vs. flattened metrics, present vs. absent provenance) — breaking FR-29's "every result has these fields" review gate the same way an unfixed field set would have broken FR-15's dataset-card gate absent AD-8.
+- **Rule:** `BenchmarkResult` always carries, at minimum: `strategy_name` (str), `strategy_parameters` (dict, JSON-native — e.g. `CVaROptimization`'s `confidence_level`), `metrics` (a flat `dict[str, float]` keyed by each `MetricFn.name`, never nested), `asset_scenario_ids` (a list identifying each constituent Scenario/dataset used, sufficient to reproduce the run), `time_grid_reference` (the shared `TimeGrid` identity per AD-22), `library_version` (str), and `generated_at` (timestamp) — deliberately mirroring AD-8's Metadata field set where the concepts overlap (`library_version`, `generated_at`). A `BenchmarkResult` producer may not omit any of these fields.
+
+### AD-25 — Benchmark layer is JAX-native by default; the Optimizer Solver Layer is the sole, bounded, swappable exception
+
+- **Binds:** `quantscenariobench.benchmark.metrics`, `quantscenariobench.benchmark.returns`, `quantscenariobench.benchmark.runner`, `quantscenariobench.benchmark.interface`, `EqualWeight` and `GlobalMinimumVariance`'s unconstrained path (`quantscenariobench.benchmark.strategies`). Reinforces the project's JAX-native identity (AD-7's precedent) for the benchmark layer specifically, per explicit user direction (2026-07-02).
+- **Prevents:** NumPy/SciPy quietly creeping into Metrics, return derivation, or Runner orchestration where a JAX-native implementation is entirely practical — eroding the project's JAX-native identity one convenience import at a time; a future contributor treating `quantscenariobench.benchmark.solver`'s use of `scipy` (AD-14) as license to reach for non-JAX tooling anywhere else in the benchmark layer; the Optimizer Solver Layer's `scipy` dependency becoming load-bearing enough elsewhere that it can no longer be swapped out later.
+- **Rule:** Every module named in Binds is implemented entirely in `jax.numpy`/`equinox` — `jit`/`vmap`-compatible, no NumPy or SciPy calls. `quantscenariobench.benchmark.solver` (AD-14) is the sole, deliberately bounded exception, used only for `GlobalMinimumVariance`'s long-only-constrained path and `CVaROptimization`'s linear program. This exception exists because, as of this update, no JAX-native constrained-optimization library was judged sufficiently mature for a v1 architectural commitment: `qpax` (a differentiable, batchable JAX-native QP solver) and `linrax`/`MPAX` (JAX-native LP solvers) exist and were considered, but are 2024–2025-era tools without scipy's decades of production hardening — noted as future replacement candidates in Deferred, not adopted now. The boundary is designed for that future swap: strategies call only `quantscenariobench.benchmark.solver.solve_allocation(...)` (AD-14); replacing its internals with a JAX-native solver requires no change to `strategies`, `runner`, `metrics`, `returns`, or any public type.
+
+### AD-26 — `EvaluationResult` is a publication-layer schema derived from `BenchmarkResult`, never a replacement for it
+
+- **Binds:** new `quantscenariobench.benchmark.evaluation` module; PRD Feature 4.9 (FR-30–FR-34). Resolves PRD Open Question 17 (partially — required fields only; the optional-field set remains open, see Deferred).
+- **Prevents:** a contributor reshaping `BenchmarkResult`'s in-memory `metrics` dict (AD-24) to satisfy a publishing or Leaderboard-rendering convenience, breaking AD-17's "terminal artifact, never re-traced" guarantee and every existing in-process consumer of `BenchmarkResult`; two publishing implementers independently inventing incompatible published shapes, the same class of gap AD-24 closed for `BenchmarkResult` and AD-8 closed for `Metadata`.
+- **Rule:** `BenchmarkResult` (AD-17, AD-24) remains the sole runtime representation, produced by `run_benchmark()`, and is unchanged by this AD — it is never itself published. `EvaluationResult` is a distinct, plain, immutable, JSON-native dataclass (the same posture AD-17 fixes for `BenchmarkResult`: no JAX arrays, no `eqx.Module` fields), produced by exactly one pure function, `quantscenariobench.benchmark.evaluation.to_evaluation_result(result: BenchmarkResult) -> EvaluationResult` (FR-31), that never mutates or subclasses `BenchmarkResult`. `EvaluationResult` always carries, at minimum, the fields FR-30 fixes: `schema_version`, `result_id`, `strategy` (`name`, `parameters` — sourced from `BenchmarkResult.strategy_name`/`strategy_parameters`), `benchmark_dataset` (`asset_scenario_ids`, `time_grid_reference` — sourced from `BenchmarkResult`'s fields of the same concepts), `metrics`, `library_version`, and `generated_at`. `EvaluationResult.metrics` is deliberately reshaped from `BenchmarkResult.metrics`'s flat `dict[str, float]` (AD-24) into an ordered list of `{name, value}` records, matching the Hugging Face `model-index.results[].metrics[]` convention that Hub rendering and Leaderboard aggregation (FR-34) both consume — this divergence is intentional, not an inconsistency with AD-24, because the two types serve different consumers (in-process code vs. the Hub) and AD-24 binds `BenchmarkResult`'s shape only. `EvaluationResult` is the canonical published representation: local storage (FR-32), Hugging Face publishing (FR-33), and Leaderboard aggregation (FR-34) all consume `EvaluationResult` exclusively — none reads a `BenchmarkResult` directly.
 
 ```mermaid
 graph LR
@@ -114,6 +212,29 @@ graph LR
   caller --> export
 ```
 
+```mermaid
+graph LR
+  strategies["benchmark.strategies (EqualWeight, GlobalMinimumVariance, CVaROptimization)"] --> bInterface["benchmark.interface (BaselineStrategy, ForecastOptimizer, PortfolioWeights, BenchmarkResult)"]
+  strategies --> bSolver["benchmark.solver (wraps scipy)"]
+  bSolver --> bInterface
+  returns["benchmark.returns (Scenario.observation -> returns)"] --> interface2["interface (Scenario)"]
+  runner["benchmark.runner (run_benchmark)"] --> bInterface
+  runner --> strategies
+  runner --> bSolver
+  runner --> returns
+  runner --> metrics["benchmark.metrics (Sharpe, Sortino, MaxDrawdown, FinalWealthFactor)"]
+  bTesting["benchmark.testing (conformance suite + dummy ForecastOptimizer)"] --> bInterface
+  caller2(["caller code"]) --> runner
+  caller2 --> strategies
+```
+
+```mermaid
+graph LR
+  evaluation["benchmark.evaluation (EvaluationResult, to_evaluation_result, local/HF storage, Leaderboard aggregation)"] --> bInterface2["benchmark.interface (BenchmarkResult)"]
+  caller3(["caller code"]) --> evaluation
+  future["Feature 4.10: hosted Leaderboard Space (future phase, not this epic)"] -.-> evaluation
+```
+
 ## Consistency Conventions
 
 | Concern | Convention |
@@ -122,6 +243,9 @@ graph LR
 | Metadata field names | Fixed per AD-8: `seed`, `prng_key_info`, `model_name`, `model_version`, `parameters`, `time_grid`, `library_version`, `dataset_version`, `generated_at`. No Market Model introduces a synonym for any of these. |
 | Soft validation (FR-6) | A single warning class (e.g. `QuantScenarioBenchValidationWarning`) is used for every research-constraint violation (Feller condition and future equivalents) across all Market Models — never a bare `UserWarning`, never a model-specific subclass. |
 | State & cross-cutting (precision, randomness) | float64 fixed per AD-7; randomness construction lives only in the Solver Layer per AD-3/AD-4; no module outside `quantscenariobench.solver` touches a JAX `PRNGKey` split for simulation purposes. |
+| Benchmark-layer naming *(added 2026-07-02)* | Traditional Baseline classes are PascalCase nouns matching the PRD Glossary exactly (`EqualWeight`, `GlobalMinimumVariance`, `CVaROptimization`); the contract types are `BaselineStrategy`/`ForecastOptimizer`; the public entrypoint is `run_benchmark` (a function, mirroring `simulate`, not a class); the Optimizer Solver Layer's internal entrypoint is `solve_allocation`, mirroring `solve_sde`. |
+| Metric function signature *(added 2026-07-02)* | Every Metric is a `MetricFn` per AD-18: one Portfolio Return array in, one `float` out. No Metric takes a Market Model, a Scenario, or a strategy as an argument — only the derived return series. |
+| Evaluation Results naming *(added 2026-07-03)* | The published type is `EvaluationResult` (never a synonym like `PublishedResult` or `LeaderboardEntry`); the transform is `to_evaluation_result` (mirrors `derive_returns`'s plain-function convention, AD-16); metrics are always a list of `{name, value}` records in `EvaluationResult`, never the flat dict `BenchmarkResult.metrics` uses (AD-24, AD-26) — no module reintroduces the flat-dict shape at the publication boundary. |
 
 ## Stack
 
@@ -131,6 +255,7 @@ graph LR
 | jax | >=0.4.38 (diffrax 0.7.2's pin) |
 | diffrax | 0.7.2 |
 | equinox | >=0.11.10 (diffrax 0.7.2's pin) |
+| scipy | >=1.16 *(added 2026-07-02, verified against PyPI 2026-07-02)* — floor pin, not an exact pin like diffrax: scipy's `optimize.minimize`/`optimize.linprog` API used here (AD-14) has been stable across recent major versions, and package resolvers pick whatever scipy release is compatible with the installed Python. 1.16.0 (Jun 2025) is the first release whose own floor is Python >=3.11 (matching the project's floor); the newest release still compatible with Python 3.11 is 1.17.0 (Jan 2026) — 1.18.0 (Jun 2026) raised scipy's own floor to Python >=3.12. |
 
 ## Structural Seed
 
@@ -142,6 +267,15 @@ quantscenariobench/
   api/              # simulate() — depends on interface + solver; accepts any conforming Market Model
   export/           # Parquet / Hugging Face publishing — depends on interface only, generic over Scenario
   testing/          # State-Space Interface conformance suite + test-only dummy Market Model (FR-11)
+  benchmark/                # added 2026-07-02 — portfolio benchmarking layer, own internal pipeline
+    interface/               # BaselineStrategy/ForecastOptimizer ABCs, PortfolioWeights, BenchmarkResult
+    strategies/              # EqualWeight, GlobalMinimumVariance, CVaROptimization — depend on benchmark.interface + benchmark.solver only
+    metrics/                 # Sharpe, Sortino, MaxDrawdown, FinalWealthFactor — pure MetricFns
+    returns/                 # Scenario.observation -> return-series derivation (FR-28); depends on top-level interface only
+    solver/                  # internal Optimizer Solver Layer — the only benchmark module that imports scipy
+    runner/                  # run_benchmark() — depends on benchmark.interface/strategies/solver/returns/metrics
+    testing/                 # Portfolio Optimizer conformance suite + test-only dummy ForecastOptimizer (FR-25)
+    evaluation/              # added 2026-07-03 — EvaluationResult, to_evaluation_result(), local/HF storage, Leaderboard aggregation; depends on benchmark.interface only (FR-30-FR-34)
 ```
 
 ## Capability → Architecture Map
@@ -152,6 +286,11 @@ quantscenariobench/
 | Feature 4.2 v1 Market Model Zoo (FR-7–FR-9) | `quantscenariobench.models` | AD-1, AD-4, AD-6, AD-7, AD-10 |
 | Feature 4.3 State-Space Extensibility Contract (FR-10–FR-11) | `quantscenariobench.interface`, `quantscenariobench.testing` | AD-1, AD-4, AD-9, AD-10 |
 | Feature 4.4 Benchmark Dataset Export & Publishing (FR-12–FR-15) | `quantscenariobench.export` | AD-2, AD-5, AD-8, AD-11 |
+| Feature 4.5 Portfolio Performance Metrics (FR-16–FR-19) *(added 2026-07-02)* | `quantscenariobench.benchmark.metrics` | AD-10, AD-18, AD-20, AD-25 |
+| Feature 4.6 Traditional Baseline Strategies (FR-20–FR-22) *(added 2026-07-02)* | `quantscenariobench.benchmark.strategies` | AD-10, AD-13, AD-14, AD-15, AD-20, AD-25, AD-6 |
+| Feature 4.7 Portfolio Optimizer Extensibility Contract (FR-23–FR-25) *(added 2026-07-02)* | `quantscenariobench.benchmark.interface`, `quantscenariobench.benchmark.testing` | AD-13, AD-19, AD-20, AD-21 |
+| Feature 4.8 Benchmark Runner & Results (FR-26–FR-29) *(added 2026-07-02)* | `quantscenariobench.benchmark.runner`, `quantscenariobench.benchmark.returns` | AD-16, AD-17, AD-18, AD-19, AD-22, AD-23, AD-24, AD-25, AD-11 |
+| Feature 4.9 Evaluation Results & Leaderboard (FR-30–FR-34) *(added 2026-07-03)* | `quantscenariobench.benchmark.evaluation` | AD-26, AD-17, AD-24, AD-19 |
 
 ## Deferred
 
@@ -168,3 +307,13 @@ quantscenariobench/
 - **Multi-asset / cross-asset simulation, CLI, real-market calibration** — out of v1 scope per PRD; not architected.
 - **Open-source license** (PRD Open Question 1) — undecided.
 - **CI/test-infrastructure scope** (PRD Open Question 6) — whether this belongs to product NFRs or pure dev-workflow scope is still unresolved; not architected either way.
+- **Portfolio Optimizer conformance test harness mechanism** (PRD FR-25 `[ASSUMPTION]`) *(added 2026-07-02)* — mirrors the pre-existing FR-11 Deferred item; pytest fixtures are the natural default, not committed.
+- **Real forecasting-model integrations (PatchTST, iTransformer, TimeMixer, or otherwise)** *(added 2026-07-02)* — out of v1 scope per PRD §6.2; AD-13's `ForecastOptimizer` ABC is designed to make wrapping one a `quantscenariobench.benchmark.strategies`-only change (analogous to how AD-1/AD-9 treat new Market Models), but no real forecasting-model integration has been attempted, only the FR-25 dummy.
+- **Hosted Leaderboard web UI (PRD Feature 4.10)** *(narrowed 2026-07-03; previously "BenchmarkResult publishing / leaderboard hosting", added 2026-07-02)* — `EvaluationResult` (AD-26), local storage, Hugging Face publishing, and Leaderboard aggregation are now designed (Feature 4.9, FR-30–FR-34); only a hosted, browsable Space/UI over that aggregation remains deferred, as an explicit future phase — see the mermaid diagram's dashed `future` node above. No Space architecture, deploy mechanism, or versioning-independence rule has been designed for it.
+- **Evaluation Results repo layout and namespace convention** (PRD Open Question 18) *(added 2026-07-03)* — AD-26 fixes `EvaluationResult`'s shape; whether it publishes to one shared repo or per-Benchmark-Dataset repos, and the Hugging Face namespace/naming convention, mirror the pre-existing undecided Benchmark Dataset namespace question (PRD Open Question 5) and are equally undecided here.
+- **Evaluation Results external/community submission and write-access model** (PRD Open Question 19) *(added 2026-07-03)* — Feature 4.9 assumes maintainer-only publishing; who else, if anyone, can publish to the shared repo, and what auth model that requires, is undesigned.
+- **Evaluation Results "verified" reproduction workflow** *(added 2026-07-03)* — `EvaluationResult`'s optional `verified` field (FR-30) may exist as a value; no process that independently re-runs a strategy and confirms/sets it has been designed.
+- **Short positions / non-long-only portfolio constraints** *(added 2026-07-02)* — AD-20 fixes `PortfolioWeights`' non-negativity as a v1-universal, type-level `[ASSUMPTION]`; allowing short positions (and what that means for `PortfolioWeights`' invariants and GMV/CVaR's solver formulation) is a deferred extension, not designed here.
+- **Distributional/quantile forecasts** *(added 2026-07-02)* — AD-21 fixes `ForecastOptimizer.forecast` as a point forecast (`Float[Array, "n"]`) for v1; a forecasting model that produces a distribution or quantiles over future returns would need a new, parallel interface, not a reinterpretation of this shape. Not designed here.
+- **`PortfolioWeights` invariant-violation and solver-failure error types** *(added 2026-07-02)* — AD-20 and AD-14 require raising (rather than silently returning a malformed vector) but the exact exception classes/hierarchy are not fixed, mirroring how the existing spine doesn't fix `QuantScenarioBenchValidationWarning`'s exact class hierarchy beyond naming it once (Consistency Conventions).
+- **JAX-native replacement for the Optimizer Solver Layer** *(added 2026-07-02, per user direction)* — AD-25 names `qpax` (differentiable, batchable JAX-native QP) and `linrax`/`MPAX` (JAX-native LP) as candidate future replacements for `scipy` inside `quantscenariobench.benchmark.solver`, judged not yet mature enough for a v1 commitment. Revisit as they mature; AD-14's `solve_allocation(...)` boundary is designed to absorb the swap without touching `strategies` or any public type.
