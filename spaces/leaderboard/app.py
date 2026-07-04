@@ -13,11 +13,13 @@ upgrade path if traffic or the Evaluation Results repo's size grows).
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 from typing import Sequence
 
 import gradio as gr
 import pandas as pd
+from huggingface_hub.errors import HfHubHTTPError
 
 from quantscenariobench.benchmark.evaluation import (
     EvaluationResult,
@@ -71,6 +73,55 @@ def load_leaderboard_table(
     return build_leaderboard_dataframe(results)
 
 
+@dataclasses.dataclass(frozen=True)
+class LeaderboardLoadResult:
+    """Outcome of attempting to load the Leaderboard for display.
+
+    Always safe to render: `table` is an empty DataFrame and `message`
+    is a user-facing explanation whenever data could not be loaded, or
+    loaded but is empty. `load_leaderboard_safely` never raises.
+    """
+
+    table: pd.DataFrame
+    message: str | None
+
+
+def load_leaderboard_safely(
+    repo_id: str | None = None, *, token: str | None = None
+) -> LeaderboardLoadResult:
+    """Load the Leaderboard for display without ever raising.
+
+    A missing, private, gated, or otherwise inaccessible Evaluation
+    Results repo -- and a reachable repo with zero published results --
+    both render as an empty table with a clear, user-facing message,
+    rather than crashing the Space. Existing behavior for a reachable,
+    non-empty repo (load_leaderboard_table) is unchanged.
+    """
+    resolved_repo_id = repo_id or _eval_results_repo()
+    try:
+        table = load_leaderboard_table(resolved_repo_id, token=token)
+    except HfHubHTTPError:
+        return LeaderboardLoadResult(
+            table=pd.DataFrame(),
+            message=(
+                f"No Evaluation Results repo is available at `{resolved_repo_id}` — "
+                "it may not exist yet, or may be private or otherwise "
+                "inaccessible. Set the `QSB_EVAL_RESULTS_REPO` environment "
+                "variable to a published Evaluation Results dataset repo to "
+                "see live results."
+            ),
+        )
+    if table.empty:
+        return LeaderboardLoadResult(
+            table=table,
+            message=(
+                f"`{resolved_repo_id}` is reachable but has no published "
+                "Evaluation Results yet."
+            ),
+        )
+    return LeaderboardLoadResult(table=table, message=None)
+
+
 _ROW_KEY_COLUMNS = ("strategy", "benchmark_dataset")
 
 
@@ -116,6 +167,12 @@ def build_app() -> gr.Blocks:
     with gr.Blocks(title="QuantScenarioBench Leaderboard") as demo:
         gr.Markdown("# QuantScenarioBench Leaderboard")
 
+        # Shown only when the Evaluation Results repo is missing, empty,
+        # private, or otherwise inaccessible -- see load_leaderboard_safely.
+        # The Space never crashes on this; it renders an empty table plus
+        # this explanation instead.
+        status_message = gr.Markdown(visible=False)
+
         # The unfiltered table loaded this session (FR-37, AD-28) -- filter
         # controls below narrow the *display* only; this snapshot is never
         # mutated, so re-filtering always starts from the full result set.
@@ -142,19 +199,28 @@ def build_app() -> gr.Blocks:
         table = gr.Dataframe(interactive=False, wrap=True)
 
         def _on_load():
-            df = load_leaderboard_table()
+            result = load_leaderboard_safely()
+            df = result.table
             return (
                 df,
                 df,
                 gr.update(choices=_unique_sorted_values(df.get("benchmark_dataset"))),
                 gr.update(choices=_unique_sorted_values(df.get("strategy"))),
                 gr.update(choices=_metric_columns(df)),
+                gr.update(value=result.message or "", visible=result.message is not None),
             )
 
         demo.load(
             fn=_on_load,
             inputs=None,
-            outputs=[table_state, table, dataset_filter, strategy_filter, metric_filter],
+            outputs=[
+                table_state,
+                table,
+                dataset_filter,
+                strategy_filter,
+                metric_filter,
+                status_message,
+            ],
         )
 
         def _on_filter_change(df, datasets, strategies, metrics):
