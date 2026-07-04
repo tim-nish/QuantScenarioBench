@@ -71,11 +71,101 @@ def load_leaderboard_table(
     return build_leaderboard_dataframe(results)
 
 
+_ROW_KEY_COLUMNS = ("strategy", "benchmark_dataset")
+
+
+def filter_leaderboard(
+    df: pd.DataFrame,
+    benchmark_datasets: Sequence[str] | None = None,
+    strategies: Sequence[str] | None = None,
+    metrics: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    """Narrow the displayed table by Benchmark Dataset, Strategy, and/or Metric (FR-39).
+
+    A pure view over `df` -- never mutates it (a new DataFrame is always
+    returned) and never re-derives or re-ranks any value, only selects
+    rows/columns already present in `df` (FR-36). Active filters combine
+    with AND: selecting a Benchmark Dataset and a Strategy narrows to
+    rows satisfying both, not either. Generic over whatever Benchmark
+    Dataset/Strategy/Metric values are actually present -- no
+    strategy/dataset/metric name is hardcoded here.
+    """
+    result = df
+    if benchmark_datasets:
+        result = result[result["benchmark_dataset"].isin(benchmark_datasets)]
+    if strategies:
+        result = result[result["strategy"].isin(strategies)]
+    if metrics:
+        keep = [c for c in _ROW_KEY_COLUMNS if c in result.columns]
+        keep += [c for c in metrics if c in result.columns]
+        result = result[keep]
+    return result.reset_index(drop=True)
+
+
+def _unique_sorted_values(series: pd.Series | None) -> list[str]:
+    if series is None or series.empty:
+        return []
+    return sorted(series.unique().tolist())
+
+
+def _metric_columns(df: pd.DataFrame) -> list[str]:
+    return [c for c in df.columns if c not in _ROW_KEY_COLUMNS]
+
+
 def build_app() -> gr.Blocks:
     with gr.Blocks(title="QuantScenarioBench Leaderboard") as demo:
         gr.Markdown("# QuantScenarioBench Leaderboard")
+
+        # The unfiltered table loaded this session (FR-37, AD-28) -- filter
+        # controls below narrow the *display* only; this snapshot is never
+        # mutated, so re-filtering always starts from the full result set.
+        table_state = gr.State(pd.DataFrame())
+
+        with gr.Row():
+            dataset_filter = gr.Dropdown(
+                label="Benchmark Dataset", multiselect=True, choices=[]
+            )
+            strategy_filter = gr.Dropdown(label="Strategy", multiselect=True, choices=[])
+            metric_filter = gr.Dropdown(label="Metric", multiselect=True, choices=[])
+
+        # Sorting (FR-38) is Gradio Dataframe's built-in, client-side
+        # column-header sort -- clicking a header reorders the displayed
+        # rows in the browser without a Python round-trip, and never
+        # touches the underlying data (Gradio's own docs: "sorting the
+        # columns in the browser will not affect the values passed to
+        # this function"). No bespoke sort algorithm or callback is
+        # introduced here (AD-27) -- interactive=False only disables
+        # cell editing, not this native sort affordance. Because the
+        # filtered view below re-renders into this same component, a
+        # header-click sort applies to whatever is currently displayed
+        # (the filtered rows/columns), not the full unfiltered table.
         table = gr.Dataframe(interactive=False, wrap=True)
-        demo.load(fn=load_leaderboard_table, inputs=None, outputs=table)
+
+        def _on_load():
+            df = load_leaderboard_table()
+            return (
+                df,
+                df,
+                gr.update(choices=_unique_sorted_values(df.get("benchmark_dataset"))),
+                gr.update(choices=_unique_sorted_values(df.get("strategy"))),
+                gr.update(choices=_metric_columns(df)),
+            )
+
+        demo.load(
+            fn=_on_load,
+            inputs=None,
+            outputs=[table_state, table, dataset_filter, strategy_filter, metric_filter],
+        )
+
+        def _on_filter_change(df, datasets, strategies, metrics):
+            return filter_leaderboard(df, datasets, strategies, metrics)
+
+        for control in (dataset_filter, strategy_filter, metric_filter):
+            control.change(
+                fn=_on_filter_change,
+                inputs=[table_state, dataset_filter, strategy_filter, metric_filter],
+                outputs=table,
+            )
     return demo
 
 
