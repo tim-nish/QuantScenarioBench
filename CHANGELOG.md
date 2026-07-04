@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/) for the
 library itself. Dataset versions are tracked independently (see `dataset_version`
 in each `Scenario`'s metadata).
 
+## [1.2.1] - 2026-07-04
+
+### Fixed
+
+- **Leaderboard Space**: the Space now handles a missing, private, gated,
+  or otherwise inaccessible Evaluation Results repository gracefully —
+  and a repository that is reachable but has zero published results —
+  instead of crashing. Both cases render an empty table with a clear,
+  user-facing message. Previously, an unset or nonexistent
+  `QSB_EVAL_RESULTS_REPO` (including the packaged default) caused the
+  Space to fail on load with an unhandled `RepositoryNotFoundError`.
+  Existing behavior when `QSB_EVAL_RESULTS_REPO` points to a valid,
+  populated dataset repo is unchanged.
+
 ## [1.2.0] - 2026-07-04
 
 ### Added
