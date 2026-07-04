@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/) for the
 library itself. Dataset versions are tracked independently (see `dataset_version`
 in each `Scenario`'s metadata).
 
+## [1.2.0] - 2026-07-04
+
+### Added
+
+- **Leaderboard Space** (Epic 8): a hosted, browsable Hugging Face Space
+  (`spaces/leaderboard/`) that renders v1.1's Leaderboard aggregation as a
+  live page — the Hugging Face Space / Gradio Leaderboard UI promised in
+  the v1.1 Notes below.
+  - Built with Gradio; a presentation layer only — it consumes
+    `quantscenariobench.benchmark.evaluation`'s existing
+    `EvaluationResult`/Leaderboard aggregation pipeline (`aggregate_evaluation_results`,
+    `load_evaluation_results_from_hub`) as an ordinary library dependency
+    and adds no aggregation, ranking, or data-model logic of its own.
+  - Live table rendering, refreshed fresh on every session load so newly
+    published results appear without redeploying the Space.
+  - Sorting by any column (Metric, Strategy, or Benchmark Dataset), via
+    Gradio's native `Dataframe` column-header sort.
+  - Filtering by Benchmark Dataset, Strategy, and Metric — independently
+    or combined — via `filter_leaderboard()`.
+  - Space deployment configuration (`spaces/leaderboard/README.md`):
+    Hugging Face Space metadata (SDK, entry point, suggested hardware)
+    and a documented git-push-to-deploy path.
+
+### Notes
+
+- The Space is scoped deliberately narrow: a ranked, sortable, filterable
+  table only. Advanced analytics, visualizations, historical/trend
+  tracking, and strategy-to-strategy comparison tooling remain explicitly
+  out of scope for this release.
+- The Space's compute tier defaults to the free CPU tier (no model
+  inference is performed) and its data currency is read-on-session-load,
+  with no server-side cache or scheduler — both sized to the project's
+  current traffic, not committed as permanent architecture. See
+  `spaces/leaderboard/README.md` and the Architecture Spine's Deferred
+  section for the upgrade path if that changes.
+- The Hugging Face namespace for the Space and its Evaluation Results
+  repo is not yet finalized — see the README's `QSB_EVAL_RESULTS_REPO`
+  configuration section.
+
 ## [1.1.0] - 2026-07-03
 
 ### Added

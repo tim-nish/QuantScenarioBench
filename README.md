@@ -24,8 +24,9 @@ QuantScenarioBench is more than a published dataset — it's an end-to-end, Hugg
 1. **Scenario generation** — reproducible price paths from established stochastic volatility models (`quantscenariobench.api`, `.models`)
 2. **Benchmark Core** — a shared interface, baselines, and metrics for scoring portfolio strategies against those Scenarios (`quantscenariobench.benchmark`)
 3. **Evaluation Results** — a versioned, JSON-native record of each benchmark run, derived from `BenchmarkResult` (`quantscenariobench.benchmark.evaluation`)
-4. **Leaderboard aggregation** — a ranked strategy × Benchmark Dataset table built from every published Evaluation Result (data only — no hosted UI yet, see [Roadmap](#roadmap))
-5. **Hugging Face-native workflow** throughout — datasets, dataset cards, and Evaluation Results all publish to and load from the Hub with the same functions used for local storage
+4. **Leaderboard aggregation** — a ranked strategy × Benchmark Dataset table built from every published Evaluation Result
+5. **Leaderboard Space** — a hosted, sortable, filterable Hugging Face Space that renders that ranked table live, so anyone can browse results without running any code (`spaces/leaderboard/`, see [Leaderboard Space](#leaderboard-space))
+6. **Hugging Face-native workflow** throughout — datasets, dataset cards, and Evaluation Results all publish to and load from the Hub with the same functions used for local storage
 
 ---
 
@@ -38,7 +39,7 @@ Quantitative finance research routinely benchmarks models against each other, bu
 - **Export** results to Parquet or publish directly to the Hugging Face Hub
 - **Reproduce** any result exactly — the same `(model, time_grid, n_paths, seed)` always produces bit-identical paths on the same computational backend
 - **Benchmark** portfolio strategies against generated Scenarios with a shared `run_benchmark()` pipeline and standardized performance metrics
-- **Publish and aggregate** benchmark runs as versioned Evaluation Results, ranked into a Leaderboard table (see [Roadmap](#roadmap) — the aggregation is implemented today; a hosted UI is planned)
+- **Publish, aggregate, and browse** benchmark runs as versioned Evaluation Results, ranked into a Leaderboard table you can query yourself or browse live on the hosted [Leaderboard Space](#leaderboard-space)
 
 ---
 
@@ -265,9 +266,7 @@ Pass it directly to `run_benchmark()` — no other integration required.
 
 ## Evaluation Results & Leaderboard
 
-> **Current scope:** this pipeline publishes and **aggregates** Evaluation Results into a ranked table. There is no hosted or public leaderboard UI yet — see [Roadmap](#roadmap).
-
-`quantscenariobench.benchmark.evaluation` turns a `BenchmarkResult` into a versioned, publishable record, and reads any collection of them back into a ranked comparison table.
+`quantscenariobench.benchmark.evaluation` turns a `BenchmarkResult` into a versioned, publishable record, and reads any collection of them back into a ranked comparison table. This section covers the publishing/aggregation pipeline itself — for the hosted, browsable page built on top of it, see [Leaderboard Space](#leaderboard-space).
 
 ```python
 from quantscenariobench.benchmark.evaluation import (
@@ -301,6 +300,37 @@ print(leaderboard)
 
 ---
 
+## Leaderboard Space
+
+A hosted, browsable Hugging Face Space — built with [Gradio](https://www.gradio.app/) — that renders the Leaderboard above as a live, sortable, filterable page. It lives at `spaces/leaderboard/`, alongside (not inside) the `quantscenariobench` package, and consumes the pipeline described in [Evaluation Results & Leaderboard](#evaluation-results--leaderboard) as an ordinary dependency: it calls `aggregate_evaluation_results()`/`load_evaluation_results_from_hub()` and renders the result. It adds no aggregation, ranking, or data-model logic of its own — every value shown comes directly from that pipeline.
+
+- **Table rendering** — the current ranked Leaderboard (strategy × Benchmark Dataset rows, one column per Metric), reloaded fresh every time the page is opened, so a newly published `EvaluationResult` appears without redeploying the Space.
+- **Sorting** — click any column header to reorder rows ascending or descending; this is Gradio's built-in `Dataframe` behavior, not custom code.
+- **Filtering** — narrow the table by Benchmark Dataset, Strategy, or Metric, independently or combined.
+- **Out of scope** — advanced analytics, visualizations (charts/plots), historical/trend views, and strategy-to-strategy comparison tooling are deliberately not part of this Space; it is a ranked table, not an analytics dashboard.
+
+### Running it locally
+
+```bash
+cd spaces/leaderboard
+pip install -r requirements.txt
+python app.py
+```
+
+This starts a local Gradio server rendering the Leaderboard from whichever Evaluation Results repo is configured (see below).
+
+### Configuring the Evaluation Results repo
+
+The Space reads from the Hugging Face dataset repo named by the `QSB_EVAL_RESULTS_REPO` environment variable:
+
+```bash
+export QSB_EVAL_RESULTS_REPO="your-org/your-evaluation-results-repo"
+```
+
+If unset, it falls back to a placeholder default (`quantscenariobench/evaluation-results`) — **the actual namespace for a shared, public Evaluation Results repo has not been finalized yet**, so there is no canonical repo ID or hosted Space URL to publish here. Point `QSB_EVAL_RESULTS_REPO` at your own published Evaluation Results repo (see [Hugging Face publishing](#evaluation-results--leaderboard) above) to run the Space against real data.
+
+---
+
 ## Architecture
 
 ```
@@ -321,6 +351,11 @@ quantscenariobench/
     ├── evaluation/   EvaluationResult, to_evaluation_result(), local storage,
     │                 HF publishing, Leaderboard aggregation
     └── testing/      Conformance suite for custom strategy authors
+
+spaces/
+└── leaderboard/  Hugging Face Space (Gradio) — see Leaderboard Space above.
+                  Sibling to quantscenariobench/, not part of the installable
+                  package; depends on it like any other consumer.
 ```
 
 **Dependency rule:** `models` and `export` import only from `interface`. The solver and API layers compose these. This keeps any custom model implementation minimal. The `benchmark` subpackage mirrors this rule one layer up: `strategies`/`metrics`/`returns` import only from `benchmark.interface` (plus `benchmark.solver` where noted), and only `benchmark.runner` composes a caller-supplied strategy — no benchmark module reaches back into `models` or the scenario-generation `solver`.
@@ -361,7 +396,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-The test suite covers closed-form price validation (Gil-Pélaez inversion for Heston; Black-Scholes formula for GBM), statistical properties (skew monotonicity in H for rBergomi), Parquet round-trips, and dataset card conformance — plus the Benchmark Core (metrics and baselines validated against hand-derived reference values, Portfolio Optimizer conformance suite) and the Evaluation Results pipeline (`BenchmarkResult` → `EvaluationResult` transform, local storage, and Leaderboard aggregation).
+The test suite covers closed-form price validation (Gil-Pélaez inversion for Heston; Black-Scholes formula for GBM), statistical properties (skew monotonicity in H for rBergomi), Parquet round-trips, and dataset card conformance — plus the Benchmark Core (metrics and baselines validated against hand-derived reference values, Portfolio Optimizer conformance suite), the Evaluation Results pipeline (`BenchmarkResult` → `EvaluationResult` transform, local storage, and Leaderboard aggregation), and the Leaderboard Space (`spaces/leaderboard/`: data loading/rendering, sorting, filtering, and deployment configuration).
 
 ---
 
@@ -374,9 +409,10 @@ The test suite covers closed-form price validation (Gil-Pélaez inversion for He
 | Benchmark Core (Portfolio Optimizer Interface, baselines, metrics, `run_benchmark()`) | Shipped — v1.1 |
 | EvaluationResult pipeline (transform, local storage, HF publishing) | Shipped — v1.1 |
 | Leaderboard **aggregation** (ranked table from published results, no UI) | Shipped — v1.1 |
-| Hugging Face Space — hosted Gradio Leaderboard **UI** | Planned — v1.2 |
+| Hugging Face Space — hosted Gradio Leaderboard **UI**, with sorting and filtering | Shipped — v1.2 |
+| Advanced analytics, visualizations, historical/trend tracking, strategy-comparison tooling | Not planned |
 
-**v1.1 gives you the data, not the dashboard:** `aggregate_evaluation_results()` returns a plain `list[dict]` you can put in a `pandas.DataFrame`, a notebook, or your own app. There is no public, hosted leaderboard page yet — that is the explicit goal of the v1.2 Hugging Face Space.
+**v1.1 shipped the data; v1.2 ships the dashboard:** `aggregate_evaluation_results()` still returns a plain `list[dict]` you can put in a `pandas.DataFrame`, a notebook, or your own app — but as of v1.2 you can also browse the same ranked table live on the hosted [Leaderboard Space](#leaderboard-space), with sorting and filtering built in. That Space was the explicit v1.2 goal referenced in earlier releases' roadmaps; it is deliberately scoped to the ranked table alone — see the Leaderboard Space section's "Out of scope" note for what's intentionally not included.
 
 ---
 
