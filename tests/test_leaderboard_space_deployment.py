@@ -54,6 +54,20 @@ def test_readme_declares_gradio_sdk_and_app_file():
     assert frontmatter["app_file"] == "app.py"
 
 
+def test_readme_short_description_within_hub_length_limit():
+    # Hub's live YAML validation (POST /api/validate-yaml) rejects a
+    # Space push outright if short_description exceeds 60 characters --
+    # a real deploy-blocking error hit deploying QuantScenarioBench/
+    # qsb-leaderboard, not caught by any test until now.
+    frontmatter = _readme_frontmatter()
+    short_description = frontmatter.get("short_description")
+    assert short_description, "README should declare a short_description"
+    assert len(short_description) <= 60, (
+        f"short_description is {len(short_description)} chars (max 60) — "
+        "the Hub rejects the push outright, not just a display truncation"
+    )
+
+
 def test_readme_declares_free_cpu_hardware_not_gpu_or_paid_tier():
     frontmatter = _readme_frontmatter()
     assert frontmatter["suggested_hardware"] == "cpu-basic", (
@@ -113,3 +127,27 @@ def test_readme_sdk_version_matches_requirements_txt_floor():
 def test_readme_documents_no_hardware_upgrade_should_be_requested():
     text = (_space_dir() / "README.md").read_text().lower()
     assert "no hardware upgrade should be requested" in text or "no model inference" in text
+
+
+# ---------------------------------------------------------------------------
+# Deploying QuantScenarioBench/qsb-leaderboard hit a real BUILD_ERROR:
+# quantscenariobench is not published on PyPI ("ERROR: Could not find a
+# version that satisfies the requirement quantscenariobench>=1.1.0 (from
+# versions: none)"). requirements.txt must install it from a source pip
+# can actually resolve (the project's own git repo, pinned to a tag),
+# not a bare version specifier that silently assumes PyPI availability.
+# ---------------------------------------------------------------------------
+
+def test_requirements_does_not_assume_quantscenariobench_is_on_pypi():
+    text = (_space_dir() / "requirements.txt").read_text()
+    for line in text.splitlines():
+        if line.strip().lower().startswith("quantscenariobench"):
+            assert "git+" in line or "@" in line, (
+                "quantscenariobench is not published on PyPI — a bare "
+                f"version specifier ('{line.strip()}') fails to build on "
+                "the Hub. Pin it to an installable source, e.g. "
+                "'quantscenariobench @ git+https://github.com/.../QuantScenarioBench.git@vX.Y.Z'"
+            )
+            break
+    else:
+        raise AssertionError("requirements.txt must declare quantscenariobench")

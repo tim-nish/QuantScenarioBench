@@ -8,7 +8,7 @@ sdk_version: 6.19.0
 app_file: app.py
 suggested_hardware: cpu-basic
 pinned: false
-short_description: Ranked, sortable, filterable QuantScenarioBench Evaluation Results Leaderboard
+short_description: Ranked, sortable, filterable QuantScenarioBench Leaderboard
 ---
 
 # QuantScenarioBench Leaderboard
