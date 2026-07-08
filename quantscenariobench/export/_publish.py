@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from typing import Sequence
+from typing import Any, Optional, Sequence
 
 import numpy as np
 
@@ -125,8 +125,47 @@ identical inputs, seeds, and library versions. The `seed`, `prng_key_info`, and
 differences can be traced to backend changes rather than parameter or code drift.
 """
 
+_REALISM_SECTION_TEMPLATE = """
+---
 
-def generate_dataset_card(scenario: Scenario) -> str:
+## Scenario Realism Diagnostics
+
+Stylized-facts validation ([Cont, 2001](https://doi.org/10.1080/713665670)) computed
+across the full path ensemble, scored against literature reference bands. In-band /
+out-of-band flags are informational only — a scenario is never rejected or filtered
+on this basis; a Market Model failing a band (e.g. Black-Scholes on volatility
+clustering) is a reported finding, not an error.
+
+| Diagnostic | Mean | Std | Reference Band | In Band |
+|------------|------|-----|-----------------|---------|
+{realism_rows}
+"""
+
+
+def _realism_report_section(realism_report: Any) -> str:
+    """Render RealismReport's DiagnosticStat fields as a markdown table
+    (FR-49, AD-38) — generic over quantscenariobench.diagnostics.RealismReport's
+    fields via duck typing (mean/std/in_band/reference_low/reference_high),
+    so quantscenariobench.export never imports quantscenariobench.diagnostics
+    directly (AD-9's one-way dependency direction is unaffected by this
+    story).
+    """
+    rows = []
+    for field in dataclasses.fields(realism_report):
+        value = getattr(realism_report, field.name)
+        if not all(hasattr(value, attr) for attr in ("mean", "std", "in_band")):
+            continue
+        in_band = "✅ yes" if value.in_band else "⚠️ no"
+        rows.append(
+            f"| `{field.name}` | {value.mean:.6g} | {value.std:.6g} | "
+            f"[{value.reference_low:g}, {value.reference_high:g}] | {in_band} |"
+        )
+    return _REALISM_SECTION_TEMPLATE.format(realism_rows="\n".join(rows))
+
+
+def generate_dataset_card(
+    scenario: Scenario, realism_report: Optional[Any] = None
+) -> str:
     """Generate a Hugging Face dataset card (README.md) for a published Scenario batch.
 
     The card contains all six required fields (FR-15):
@@ -137,11 +176,22 @@ def generate_dataset_card(scenario: Scenario) -> str:
     5. Dataset version identifier
     6. Backend-scoped reproducibility caveat
 
+    realism_report is additive (FR-49, AD-38): when supplied (the
+    quantscenariobench.diagnostics.RealismReport that calling
+    quantscenariobench.diagnostics.realism_report(scenario) produces), a
+    further "Scenario Realism Diagnostics" section is appended with each
+    diagnostic's cross-path mean/std, reference band, and in-band flag.
+    None (the default) leaves the generated card byte-for-byte unchanged
+    from before this parameter existed — computing a RealismReport is
+    never triggered implicitly by this function or by publish_to_hub().
+
     Parameters
     ----------
     scenario:
         A :class:`~quantscenariobench.interface.Scenario` whose metadata
         provides all card content. Any Scenario from ``simulate()`` is valid.
+    realism_report:
+        Optional pre-computed realism report to embed additively.
 
     Returns
     -------
@@ -177,7 +227,7 @@ def generate_dataset_card(scenario: Scenario) -> str:
         for col in PARQUET_COLUMNS
     )
 
-    return _CARD_TEMPLATE.format(
+    card = _CARD_TEMPLATE.format(
         model_name=meta.model_name,
         library_version=meta.library_version,
         dataset_version=meta.dataset_version,
@@ -188,6 +238,9 @@ def generate_dataset_card(scenario: Scenario) -> str:
         t1=t1,
         n_paths=meta.n_paths,
     )
+    if realism_report is not None:
+        card += _realism_report_section(realism_report)
+    return card
 
 
 def publish_to_hub(
@@ -197,6 +250,7 @@ def publish_to_hub(
     token: str | None = None,
     commit_message: str = "Upload QuantScenarioBench benchmark dataset",
     basket_metadata=None,
+    realism_report: Optional[Any] = None,
 ) -> str:
     """Publish a batch of Scenarios to the Hugging Face Hub as a dataset.
 
@@ -223,6 +277,13 @@ def publish_to_hub(
         survives Hub publish/reload unchanged. None (the default) leaves
         the uploaded Parquet schema exactly as before this parameter
         existed.
+    realism_report:
+        Optional pre-computed realism report (FR-49, AD-38) — forwarded
+        additively to :func:`generate_dataset_card`. Never computed
+        implicitly by this function: the caller must call
+        ``quantscenariobench.diagnostics.realism_report(scenario)``
+        explicitly and pass the result, keeping the diagnostics module's
+        own cost opt-in.
 
     Returns
     -------
@@ -246,7 +307,9 @@ def publish_to_hub(
     import tempfile
     from pathlib import Path
 
-    card_text = generate_dataset_card(scenarios[0]) if scenarios else ""
+    card_text = (
+        generate_dataset_card(scenarios[0], realism_report=realism_report) if scenarios else ""
+    )
 
     api = hf.HfApi(token=token)
     api.create_repo(repo_id=repo_id, repo_type="dataset", exist_ok=True, token=token)

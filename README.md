@@ -211,6 +211,25 @@ scenarios, basket_metadata = simulate_correlated_basket(models, TimeGrid(jnp.lin
 
 ---
 
+## Scenario Realism Diagnostics
+
+`quantscenariobench.diagnostics` measures — rather than just asserts — how well a Scenario's simulated paths reproduce the stylized facts of real asset returns ([Cont, 2001](https://doi.org/10.1080/713665670)): heavy tails, volatility clustering, absence of linear autocorrelation, the leverage effect, and aggregational Gaussianity.
+
+```python
+from quantscenariobench.diagnostics import realism_report
+
+report = realism_report(scenario)  # the full n_paths ensemble, vectorized — no per-path loop
+print(report.excess_kurtosis)             # DiagnosticStat(mean=..., std=..., in_band=..., reference_low=..., reference_high=...)
+print(report.squared_return_acf_lag1)     # volatility clustering
+print(report.leverage_correlation)        # negative for equity-like scenarios (e.g. Heston with rho < 0)
+```
+
+- Every field is a `DiagnosticStat` (cross-path mean/std, a literature reference band, and an in-band flag) — computed against a fixed, documented range, never fetched or computed from live market data.
+- `realism_report()` never rejects or filters a scenario: Black-Scholes correctly failing the volatility-clustering band is a reported finding, not an error.
+- `RealismReport` is JSON-serializable (`RealismReport.from_dict`/`dataclasses.asdict`) and embeds additively into a Hub dataset card: `generate_dataset_card(scenario, realism_report=report)`.
+
+---
+
 ## Reproducibility
 
 Identical `(model, time_grid, n_paths, seed)` inputs produce **bit-identical paths** on the same computational backend (CPU / GPU / TPU). Cross-backend bit-identity is not guaranteed due to floating-point differences across JAX backends. The `seed`, `prng_key_info`, and `library_version` metadata fields document full provenance for every batch.
