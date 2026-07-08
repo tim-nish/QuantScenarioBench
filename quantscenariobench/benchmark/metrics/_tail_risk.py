@@ -14,6 +14,9 @@ never an inner optimization loop, keeping both metrics jit-compatible.
 
 value_at_risk/conditional_value_at_risk are opt-in, parametrized Metric
 factories (Story 9.1's protocol) — never added to DEFAULT_METRICS (AD-32).
+
+See README "Metric Conventions" for the risk-free-rate, annualization,
+and compounding conventions shared across this metrics package.
 """
 from __future__ import annotations
 

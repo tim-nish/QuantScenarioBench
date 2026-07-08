@@ -636,3 +636,208 @@ def test_tail_risk_metric_is_jit_compatible(factory_name):
     eager = score(returns)
     jitted = jax.jit(score)(returns)
     assert jnp.allclose(eager, jitted)
+
+
+# ===========================================================================
+# Story 9.3 — Calmar Ratio & Explicit Annualization Convention
+#
+# Covers all acceptance criteria from GitHub Issue #81.
+# ===========================================================================
+
+def _hand_derived_total_return_and_max_drawdown(returns):
+    """Plain-Python reference (no numpy/jax), matching _max_drawdown.py's
+    exact wealth-reconstruction/drawdown definition.
+    """
+    wealth = []
+    running = 1.0
+    for r in returns:
+        running *= (1.0 + r)
+        wealth.append(running)
+    total_return = wealth[-1] - 1.0
+
+    peak = []
+    running_peak = -math.inf
+    for w in wealth:
+        running_peak = max(running_peak, w)
+        peak.append(running_peak)
+    drawdowns = [(w - p) / p for w, p in zip(wealth, peak)]
+    max_drawdown_value = min(drawdowns)
+    return total_return, max_drawdown_value
+
+
+# ---------------------------------------------------------------------------
+# AC1: calmar_ratio matches a hand-computed ratio to 1e-12, sharing
+# max_drawdown's exact drawdown definition (FR-42, AD-32)
+# ---------------------------------------------------------------------------
+
+def test_calmar_ratio_matches_hand_derived_reference():
+    from quantscenariobench.benchmark.metrics import calmar_ratio
+
+    # periods_per_year == t makes the annualization exponent exactly 1.0,
+    # isolating the calmar formula itself from annualization amplification.
+    context = _make_context(jnp.array(_RETURNS), n_assets=1)
+    total_return, max_drawdown_value = _hand_derived_total_return_and_max_drawdown(_RETURNS)
+    expected = total_return / abs(max_drawdown_value)
+
+    metric = calmar_ratio(periods_per_year=len(_RETURNS))
+    assert float(metric(context)) == pytest.approx(expected, abs=_TAIL_RISK_TOL)
+
+
+def test_calmar_ratio_shares_max_drawdown_definition():
+    from quantscenariobench.benchmark import metrics as m
+    from quantscenariobench.benchmark.metrics import calmar_ratio
+
+    src = (_pkg_root() / "benchmark" / "metrics" / "_calmar.py").read_text()
+    assert "max_drawdown" in src, (
+        "calmar_ratio must reuse max_drawdown's definition, not re-derive it"
+    )
+
+    returns = jnp.array(_RETURNS)
+    context = _make_context(returns)
+    metric = calmar_ratio(periods_per_year=len(_RETURNS))
+
+    # The metric's own drawdown component must equal calling max_drawdown directly.
+    expected_drawdown = float(m.max_drawdown(returns))
+    total_return = float(m.final_wealth_factor(returns)) - 1.0
+    expected_calmar = total_return / abs(expected_drawdown)
+    assert float(metric(context)) == pytest.approx(expected_calmar, abs=_TAIL_RISK_TOL)
+
+
+# ---------------------------------------------------------------------------
+# AC2: calmar_ratio returns 0.0 (never inf/NaN) on a monotonically
+# increasing wealth path (zero drawdown), mirroring _sharpe.py's AD-18
+# degenerate-guard posture
+# ---------------------------------------------------------------------------
+
+def test_calmar_ratio_returns_zero_for_monotonically_increasing_wealth():
+    from quantscenariobench.benchmark.metrics import calmar_ratio
+
+    increasing_returns = jnp.array([0.01, 0.02, 0.01, 0.03])
+    context = _make_context(increasing_returns)
+    metric = calmar_ratio()
+
+    value = metric(context)
+    assert float(value) == 0.0
+    assert not bool(jnp.isnan(value))
+    assert not bool(jnp.isinf(value))
+
+
+# ---------------------------------------------------------------------------
+# AC3: annualized_sharpe(periods_per_year=252) == sharpe_ratio * sqrt(252)
+# on the same series (FR-42)
+# ---------------------------------------------------------------------------
+
+def test_annualized_sharpe_equals_unannualized_times_sqrt_periods_per_year():
+    from quantscenariobench.benchmark.metrics import annualized_sharpe, sharpe_ratio
+
+    returns = jnp.array(_RETURNS)
+    context = _make_context(returns)
+
+    unannualized = float(sharpe_ratio(returns))
+    annualized = float(annualized_sharpe(periods_per_year=252)(context))
+
+    assert annualized == pytest.approx(unannualized * math.sqrt(252), abs=_TAIL_RISK_TOL)
+
+
+# ---------------------------------------------------------------------------
+# AC4: annualized variants use distinct names and never redefine
+# sharpe_ratio — the un-annualized default stays every existing metric's
+# default (FR-42, AD-32)
+# ---------------------------------------------------------------------------
+
+def test_annualized_sharpe_uses_distinct_name_and_does_not_mutate_sharpe_ratio():
+    from quantscenariobench.benchmark.metrics import annualized_sharpe, sharpe_ratio
+
+    original_name = sharpe_ratio.name
+    original_id = id(sharpe_ratio)
+
+    metric = annualized_sharpe(periods_per_year=252)
+    assert metric.name == "sharpe_ratio_annualized_252"
+    assert metric.name != sharpe_ratio.name
+
+    # sharpe_ratio itself is untouched by constructing the annualized variant.
+    assert sharpe_ratio.name == original_name
+    assert id(sharpe_ratio) == original_id
+
+
+@pytest.mark.parametrize("periods_per_year", [12, 52, 252])
+def test_annualized_sharpe_name_embeds_periods_per_year(periods_per_year):
+    from quantscenariobench.benchmark.metrics import annualized_sharpe
+
+    metric = annualized_sharpe(periods_per_year=periods_per_year)
+    assert metric.name == f"sharpe_ratio_annualized_{periods_per_year}"
+    assert metric.params == {"periods_per_year": float(periods_per_year)}
+    assert metric.direction == "higher_is_better"
+
+
+# ---------------------------------------------------------------------------
+# AC5: DEFAULT_METRICS is byte-identical before/after this story — Calmar
+# and annualized variants are additive only (FR-42)
+# ---------------------------------------------------------------------------
+
+def test_default_metrics_unchanged_by_calmar_and_annualization():
+    from quantscenariobench.benchmark.metrics import DEFAULT_METRICS
+
+    names = {metric.name for metric in DEFAULT_METRICS}
+    assert names == {
+        "sharpe_ratio", "sortino_ratio", "max_drawdown", "final_wealth_factor",
+    }
+    assert not any(
+        name == "calmar_ratio" or name.startswith("sharpe_ratio_annualized_")
+        for name in names
+    )
+
+
+# ---------------------------------------------------------------------------
+# AC6: a "Metric Conventions" section exists in the README and is linked
+# from the relevant metric docstrings (FR-42)
+# ---------------------------------------------------------------------------
+
+def test_readme_has_metric_conventions_section():
+    readme = (Path(__file__).parent.parent / "README.md").read_text()
+    assert "Metric Conventions" in readme
+    assert "periods_per_year" in readme
+
+
+@pytest.mark.parametrize("filename", [
+    "_sharpe.py", "_sortino.py", "_max_drawdown.py", "_final_wealth_factor.py",
+    "_calmar.py", "_tail_risk.py",
+])
+def test_metric_docstring_links_to_readme_metric_conventions(filename):
+    src = (_pkg_root() / "benchmark" / "metrics" / filename).read_text()
+    assert "Metric Conventions" in src
+
+
+# ---------------------------------------------------------------------------
+# calmar_ratio/annualized_sharpe are Story 9.1 Metric instances, native
+# (not legacy-wrapped) and jit-compatible (Dev Notes, Review Focus)
+# ---------------------------------------------------------------------------
+
+def test_calmar_ratio_and_annualized_sharpe_are_metric_instances():
+    from quantscenariobench.benchmark.metrics import Metric, annualized_sharpe, calmar_ratio
+
+    assert isinstance(calmar_ratio(), Metric)
+    assert isinstance(annualized_sharpe(), Metric)
+
+
+@pytest.mark.parametrize("factory_name", ["calmar_ratio", "annualized_sharpe"])
+def test_calmar_and_annualized_sharpe_are_jit_compatible(factory_name):
+    from quantscenariobench.benchmark import metrics as m
+    from quantscenariobench.benchmark.interface import PortfolioWeights
+    from quantscenariobench.benchmark.metrics import MetricContext
+
+    metric = getattr(m, factory_name)()
+    weights = PortfolioWeights(jnp.array([1.0]))
+
+    def score(returns):
+        context = MetricContext(
+            portfolio_returns=returns,
+            weights=weights,
+            evaluation_returns=jnp.ones((1, 1)),
+        )
+        return metric(context)
+
+    returns = jnp.array(_RETURNS)
+    eager = score(returns)
+    jitted = jax.jit(score)(returns)
+    assert jnp.allclose(eager, jitted)

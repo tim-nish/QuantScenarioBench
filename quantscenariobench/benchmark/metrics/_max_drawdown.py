@@ -12,6 +12,9 @@ def max_drawdown(returns: Float[Array, " t"]) -> Float[Array, ""]:
     (wealth(0) implicit at 1.0). Maximum Drawdown is the largest
     peak-to-trough decline of that wealth path, reported as a
     non-positive fraction (e.g. -0.2 for a 20% drawdown).
+
+    See README "Metric Conventions" for the risk-free-rate, annualization,
+    and compounding conventions shared across this metrics package.
     """
     wealth = jnp.cumprod(1.0 + returns)
     running_peak = jax.lax.cummax(wealth)
