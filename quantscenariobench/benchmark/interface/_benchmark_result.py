@@ -20,6 +20,13 @@ class BenchmarkResult:
     dict, not a RebalanceSchedule reference, so old published JSON
     lacking this key still loads via the dataclass field's own default
     (AC7), with no custom reconstruction required.
+
+    cost_model is additive (FR-45, AD-34): the plain-dict materialization
+    of the active TransactionCostModel (e.g.
+    {"model": "ProportionalCost", "one_way_bps": 10.0}), or None when no
+    cost model was supplied — the same plain-dict, not-a-typed-reference
+    posture as rebalance_schedule, for the same backward-compatible-load
+    reason (AC1).
     """
 
     strategy_name: str
@@ -30,3 +37,4 @@ class BenchmarkResult:
     library_version: str
     generated_at: str
     rebalance_schedule: Optional[dict] = None
+    cost_model: Optional[dict] = None

@@ -1028,3 +1028,182 @@ def test_default_metrics_unchanged_by_concentration_metrics():
         "sharpe_ratio", "sortino_ratio", "max_drawdown", "final_wealth_factor",
     }
     assert not names & {"herfindahl_index", "weight_entropy", "effective_number_of_assets"}
+
+
+# ===========================================================================
+# Story 10.2 — Turnover Metric & Proportional Transaction-Cost Model
+#
+# Covers all acceptance criteria from GitHub Issue #84.
+# ===========================================================================
+
+def _turnover_context(weights_by_rebalance, drifted_weights):
+    from quantscenariobench.benchmark.interface import PortfolioWeights
+    from quantscenariobench.benchmark.metrics import MetricContext
+
+    n = len(weights_by_rebalance[0])
+    weight_sequence = [PortfolioWeights(jnp.array(w)) for w in weights_by_rebalance]
+    return MetricContext(
+        portfolio_returns=jnp.zeros(len(weight_sequence) + 1),
+        weights=weight_sequence,
+        evaluation_returns=jnp.ones((len(weight_sequence) + 1, n)),
+        auxiliary={"drifted_weights": [jnp.array(d) for d in drifted_weights]},
+    )
+
+
+# ---------------------------------------------------------------------------
+# AC4: turnover is well-defined and exactly 0.0 under buy-and-hold
+# (context.weights is a single PortfolioWeights, no rebalances)
+# ---------------------------------------------------------------------------
+
+def test_turnover_is_exactly_zero_under_buy_and_hold():
+    from quantscenariobench.benchmark.interface import PortfolioWeights
+    from quantscenariobench.benchmark.metrics import MetricContext, turnover
+
+    context = MetricContext(
+        portfolio_returns=jnp.zeros(5),
+        weights=PortfolioWeights(jnp.array([0.5, 0.5])),
+        evaluation_returns=jnp.ones((5, 2)),
+    )
+    value = turnover(context)
+    assert float(value) == 0.0
+    assert not bool(jnp.isnan(value))
+
+
+def test_turnover_is_exactly_zero_for_a_single_rebalance_with_no_prior_trade():
+    from quantscenariobench.benchmark.metrics import turnover
+
+    # A weight sequence of length 1 (one rebalance covering the whole
+    # window) has no drifted_weights entries — no trade has occurred yet.
+    context = _turnover_context([[0.7, 0.3]], drifted_weights=[])
+    assert float(turnover(context)) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# turnover matches a hand-computed value: Δw is the trade at each
+# rebalance after the first — target minus the pre-trade drifted weight,
+# not the difference between consecutive targets (AC4's "drift forces
+# trades back to equal weights" framing)
+# ---------------------------------------------------------------------------
+
+def test_turnover_matches_hand_computed_target_minus_drifted():
+    from quantscenariobench.benchmark.metrics import turnover
+
+    # One rebalance-after-the-first: target [0.4, 0.6] traded from a
+    # drifted [0.77470356..., 0.22529644...] pre-trade weight.
+    drifted = jnp.array([0.882, 0.2565]) / 1.1385  # see Story 10.2 PR's hand-derivation
+    context = _turnover_context([[0.7, 0.3], [0.4, 0.6]], drifted_weights=[drifted])
+
+    expected = float(jnp.sum(jnp.abs(jnp.array([0.4, 0.6]) - drifted)))
+    assert float(turnover(context)) == pytest.approx(expected, abs=1e-12)
+
+
+def test_turnover_uses_target_minus_drifted_not_consecutive_targets():
+    """EqualWeight always re-targets the same weights every rebalance, so
+    a (wrong) consecutive-target-difference formula would always give
+    turnover == 0; the correct target-minus-drifted formula must not.
+    """
+    from quantscenariobench.benchmark.metrics import turnover
+
+    equal_weights = [0.5, 0.5]
+    drifted = jnp.array([0.6, 0.4])  # drifted away from equal weight
+    context = _turnover_context([equal_weights, equal_weights], drifted_weights=[drifted])
+
+    assert float(turnover(context)) > 0.0
+
+
+# ---------------------------------------------------------------------------
+# AC4: EqualWeight with monthly rebalancing over a volatile synthetic
+# dataset produces strictly positive turnover (drift forces trades back
+# to equal weights) — an end-to-end check through run_benchmark()
+# ---------------------------------------------------------------------------
+
+def test_equal_weight_monthly_rebalancing_produces_strictly_positive_turnover():
+    from quantscenariobench.benchmark.interface import RebalanceSchedule
+    from quantscenariobench.benchmark.metrics import turnover
+    from quantscenariobench.benchmark.runner import run_benchmark
+    from quantscenariobench.benchmark.strategies import EqualWeight
+
+    n = 4
+    hist = jax.random.normal(jax.random.PRNGKey(50), (30, n)) * 0.02
+    eval_ = jax.random.normal(jax.random.PRNGKey(51), (252, n)) * 0.02  # volatile
+
+    result = run_benchmark(
+        EqualWeight(), hist, eval_,
+        rebalance_schedule=RebalanceSchedule(k=21),
+        metrics=(turnover,),
+    )
+    assert result.metrics["turnover"] > 0.0
+
+
+def test_equal_weight_buy_and_hold_turnover_is_zero():
+    from quantscenariobench.benchmark.metrics import turnover
+    from quantscenariobench.benchmark.runner import run_benchmark
+    from quantscenariobench.benchmark.strategies import EqualWeight
+
+    n = 4
+    hist = jax.random.normal(jax.random.PRNGKey(50), (30, n)) * 0.02
+    eval_ = jax.random.normal(jax.random.PRNGKey(51), (252, n)) * 0.02
+
+    result = run_benchmark(EqualWeight(), hist, eval_, metrics=(turnover,))
+    assert result.metrics["turnover"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# turnover/turnover_annualized are correctly shaped Metric instances,
+# never added to DEFAULT_METRICS (AD-32)
+# ---------------------------------------------------------------------------
+
+def test_turnover_metric_shape():
+    from quantscenariobench.benchmark.metrics import Metric, turnover
+
+    assert isinstance(turnover, Metric)
+    assert turnover.name == "turnover"
+    assert turnover.direction == "lower_is_better"
+    assert turnover.params is None
+
+
+@pytest.mark.parametrize("periods_per_year", [12, 52, 252])
+def test_turnover_annualized_metric_shape(periods_per_year):
+    from quantscenariobench.benchmark.metrics import Metric, turnover_annualized
+
+    metric = turnover_annualized(periods_per_year=periods_per_year)
+    assert isinstance(metric, Metric)
+    assert metric.name == f"turnover_annualized_{periods_per_year}"
+    assert metric.direction == "lower_is_better"
+    assert metric.params == {"periods_per_year": float(periods_per_year)}
+
+
+def test_turnover_annualized_scales_by_rebalances_per_year():
+    from quantscenariobench.benchmark.metrics import turnover_annualized
+
+    drifted = jnp.array([0.882, 0.2565]) / 1.1385
+    context = _turnover_context([[0.7, 0.3], [0.4, 0.6]], drifted_weights=[drifted])
+    # t2 = 3 (evaluation_returns has 3 rows, per _turnover_context), num_rebalances = 2
+    # rebalances_per_year = periods_per_year * 2 / 3
+    metric = turnover_annualized(periods_per_year=252)
+    per_rebalance_turnover = float(jnp.sum(jnp.abs(jnp.array([0.4, 0.6]) - drifted)))
+    expected = per_rebalance_turnover * (252 * 2 / 3)
+    assert float(metric(context)) == pytest.approx(expected, abs=1e-9)
+
+
+def test_turnover_annualized_is_zero_under_buy_and_hold():
+    from quantscenariobench.benchmark.interface import PortfolioWeights
+    from quantscenariobench.benchmark.metrics import MetricContext, turnover_annualized
+
+    context = MetricContext(
+        portfolio_returns=jnp.zeros(5),
+        weights=PortfolioWeights(jnp.array([0.5, 0.5])),
+        evaluation_returns=jnp.ones((5, 2)),
+    )
+    assert float(turnover_annualized(252)(context)) == 0.0
+
+
+def test_default_metrics_unchanged_by_turnover():
+    from quantscenariobench.benchmark.metrics import DEFAULT_METRICS
+
+    names = {metric.name for metric in DEFAULT_METRICS}
+    assert names == {
+        "sharpe_ratio", "sortino_ratio", "max_drawdown", "final_wealth_factor",
+    }
+    assert "turnover" not in names
+    assert not any(name.startswith("turnover_annualized_") for name in names)

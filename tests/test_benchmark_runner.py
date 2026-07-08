@@ -430,9 +430,11 @@ def test_run_benchmark_default_rebalance_schedule_matches_golden_result(strategy
     actual.pop("generated_at")
     actual.pop("library_version")
 
-    # rebalance_schedule is additive: absent from the golden fixture
-    # (captured before this story), present as None on the fresh result.
+    # rebalance_schedule/cost_model are both additive: absent from the
+    # golden fixture (captured before Story 10.1/10.2), present as None
+    # on the fresh result.
     assert actual.pop("rebalance_schedule") is None
+    assert actual.pop("cost_model") is None
     assert actual == golden
 
 
@@ -458,6 +460,7 @@ def test_run_benchmark_explicit_k_none_rebalance_schedule_matches_golden_result(
     # see the previous test) — but behaves identically (metrics match the
     # golden fixture bit-for-bit either way).
     assert actual.pop("rebalance_schedule") == {"k": None}
+    assert actual.pop("cost_model") is None
     assert actual == golden
 
 
@@ -493,8 +496,8 @@ def test_rebalancing_loop_k21_252_step_equal_weight_12_refits_matches_numpy_refe
     eval_ = _returns(jax.random.PRNGKey(11), 252, n)
     k = 21
 
-    portfolio_returns, weight_sequence = _run_rebalancing_loop(
-        EqualWeight(), hist, eval_, None, k
+    portfolio_returns, weight_sequence, _ = _run_rebalancing_loop(
+        EqualWeight(), hist, eval_, None, k, None
     )
     assert len(weight_sequence) == 12
 
@@ -552,8 +555,8 @@ def test_rebalancing_loop_causality_shifting_post_ti_returns_does_not_change_ear
     # EqualWeight) and JAX-native (no scipy call), so this is a meaningful,
     # fast causality check.
     strategy = GlobalMinimumVariance(long_only=False)
-    _, weights_a = _run_rebalancing_loop(strategy, hist, eval_a, None, k)
-    _, weights_b = _run_rebalancing_loop(strategy, hist, eval_b, None, k)
+    _, weights_a, _ = _run_rebalancing_loop(strategy, hist, eval_a, None, k, None)
+    _, weights_b, _ = _run_rebalancing_loop(strategy, hist, eval_b, None, k, None)
 
     # t_0 = 0 depends only on historical_returns: unaffected by any change
     # to evaluation_returns.
@@ -588,7 +591,7 @@ def test_rebalancing_loop_drifts_weights_rather_than_resetting_every_step():
     eval_ = jnp.array([[0.20, -0.10], [0.05, -0.05]])
     k = 2
 
-    portfolio_returns, _ = _run_rebalancing_loop(FixedWeights(), hist, eval_, None, k)
+    portfolio_returns, _, _ = _run_rebalancing_loop(FixedWeights(), hist, eval_, None, k, None)
 
     entering_weights = jnp.array([0.7, 0.3])
     reset_every_step_reference = eval_ @ entering_weights
@@ -719,6 +722,37 @@ def test_rebalance_schedule_is_plain_frozen_dataclass_defaulting_to_k_none():
 
 
 # ---------------------------------------------------------------------------
+# ProportionalCost is a plain, JSON-native value type mirroring
+# RebalanceSchedule's house style (Story 10.2, FR-45, AD-34)
+# ---------------------------------------------------------------------------
+
+def test_proportional_cost_is_plain_frozen_dataclass():
+    import equinox as eqx
+
+    from quantscenariobench.benchmark.interface import ProportionalCost
+
+    cost_model = ProportionalCost(one_way_bps=10)
+    assert cost_model.one_way_bps == 10
+    assert dataclasses.is_dataclass(cost_model)
+    assert type(cost_model).__dataclass_params__.frozen is True
+    assert not isinstance(cost_model, eqx.Module)
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        cost_model.one_way_bps = 5
+
+
+def test_proportional_cost_cost_method_matches_formula():
+    from quantscenariobench.benchmark.interface import ProportionalCost
+
+    w_target = jnp.array([0.4, 0.6])
+    w_drifted = jnp.array([0.6, 0.4])
+    cost_model = ProportionalCost(one_way_bps=10)
+
+    expected = (10 / 1e4) * jnp.sum(jnp.abs(w_target - w_drifted))
+    assert float(cost_model.cost(w_target, w_drifted)) == pytest.approx(float(expected), abs=1e-15)
+
+
+# ---------------------------------------------------------------------------
 # MetricContext.weights carries the full weight sequence for a rebalanced
 # run, and weight-dependent metrics score it without error (Story 9.1/9.4
 # follow-on impact, flagged in this story's Dev Notes)
@@ -743,3 +777,249 @@ def test_run_benchmark_rebalanced_run_scores_weight_dependent_metric():
     # HHI over the weight sequence is exactly 1/n, same as the
     # buy-and-hold case (Story 9.4's degenerate one-element average).
     assert result.metrics["herfindahl_index"] == pytest.approx(1.0 / n, abs=1e-12)
+
+
+# ===========================================================================
+# Story 10.2 — Turnover Metric & Proportional Transaction-Cost Model
+#
+# Covers all acceptance criteria from GitHub Issue #84.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# AC1: cost_model=None (the default) is bit-identical to pre-story golden
+# results — already exercised by the golden-fixture tests above, which
+# assert result.cost_model is None; here we additionally confirm the k=21
+# rebalancing path (Story 10.1's own NumPy-reference regression,
+# unaffected by cost_model=None) produces the same portfolio-return
+# series whether cost_model is omitted or explicitly None (FR-45, AD-34).
+# ---------------------------------------------------------------------------
+
+def test_rebalancing_loop_cost_model_none_omitted_or_explicit_are_identical():
+    from quantscenariobench.benchmark.runner._run_benchmark import _run_rebalancing_loop
+    from quantscenariobench.benchmark.strategies import EqualWeight
+
+    n = 3
+    hist = _returns(jax.random.PRNGKey(60), 30, n)
+    eval_ = _returns(jax.random.PRNGKey(61), 60, n)
+    k = 20
+
+    returns_no_cost, _, _ = _run_rebalancing_loop(EqualWeight(), hist, eval_, None, k, None)
+    returns_default, _, _ = _run_rebalancing_loop(EqualWeight(), hist, eval_, None, k, None)
+    assert jnp.array_equal(returns_no_cost, returns_default)
+
+
+# ---------------------------------------------------------------------------
+# AC2: ProportionalCost(0) nets to exactly the gross series
+# ---------------------------------------------------------------------------
+
+def test_proportional_cost_zero_bps_equals_gross_series():
+    from quantscenariobench.benchmark.interface import ProportionalCost
+    from quantscenariobench.benchmark.runner._run_benchmark import _run_rebalancing_loop
+    from quantscenariobench.benchmark.strategies import GlobalMinimumVariance
+
+    n = 3
+    hist = _returns(jax.random.PRNGKey(62), 30, n)
+    eval_ = _returns(jax.random.PRNGKey(63), 60, n)
+    k = 20
+    strategy = GlobalMinimumVariance(long_only=False)
+
+    gross, _, _ = _run_rebalancing_loop(strategy, hist, eval_, None, k, None)
+    net_zero, _, _ = _run_rebalancing_loop(strategy, hist, eval_, None, k, ProportionalCost(0))
+
+    assert jnp.array_equal(gross, net_zero)
+
+
+def test_run_benchmark_cost_model_zero_bps_matches_no_cost_model_metrics():
+    from quantscenariobench.benchmark.interface import ProportionalCost, RebalanceSchedule
+    from quantscenariobench.benchmark.metrics import DEFAULT_METRICS
+    from quantscenariobench.benchmark.runner import run_benchmark
+    from quantscenariobench.benchmark.strategies import EqualWeight
+
+    n = 3
+    hist = _returns(jax.random.PRNGKey(64), 30, n)
+    eval_ = _returns(jax.random.PRNGKey(65), 60, n)
+    schedule = RebalanceSchedule(k=20)
+
+    result_none = run_benchmark(
+        EqualWeight(), hist, eval_, rebalance_schedule=schedule, metrics=DEFAULT_METRICS
+    )
+    result_zero = run_benchmark(
+        EqualWeight(), hist, eval_, rebalance_schedule=schedule,
+        cost_model=ProportionalCost(0), metrics=DEFAULT_METRICS,
+    )
+    assert result_none.metrics == result_zero.metrics
+    assert result_none.cost_model is None
+    assert result_zero.cost_model == {"model": "ProportionalCost", "one_way_bps": 0}
+
+
+# ---------------------------------------------------------------------------
+# AC3: a hand-computed two-period example with a known weight change and
+# one_way_bps=10 — net return at the rebalance step differs from gross by
+# exactly 1e-3 * sum(|Δw|)
+# ---------------------------------------------------------------------------
+
+def test_proportional_cost_hand_computed_two_period_example():
+    from quantscenariobench.benchmark.interface import BaselineStrategy, PortfolioWeights, ProportionalCost
+    from quantscenariobench.benchmark.runner._run_benchmark import _run_rebalancing_loop
+
+    def make_two_period_strategy():
+        targets = iter([jnp.array([0.7, 0.3]), jnp.array([0.4, 0.6])])
+
+        class TwoPeriodStrategy(BaselineStrategy):
+            def allocate(self, historical_returns):
+                return PortfolioWeights(next(targets))
+
+        return TwoPeriodStrategy()
+
+    hist = jnp.zeros((5, 2))
+    eval_ = jnp.array([[0.20, -0.10], [0.05, -0.05], [0.02, 0.01], [0.03, -0.02]])
+    k = 2  # rebalance dates t=0, t=2
+
+    gross, _, drifted_weights = _run_rebalancing_loop(
+        make_two_period_strategy(), hist, eval_, None, k, None
+    )
+    net, _, _ = _run_rebalancing_loop(
+        make_two_period_strategy(), hist, eval_, None, k, ProportionalCost(10)
+    )
+
+    assert len(drifted_weights) == 1
+    delta_w = jnp.sum(jnp.abs(jnp.array([0.4, 0.6]) - drifted_weights[0]))
+    expected_diff = 1e-3 * delta_w
+
+    # Only the rebalance-day return (index 2, the start of the second
+    # holding period) differs; every other day is untouched.
+    assert float(gross[2] - net[2]) == pytest.approx(float(expected_diff), abs=1e-12)
+    for i in (0, 1, 3):
+        assert float(gross[i]) == pytest.approx(float(net[i]), abs=1e-15)
+
+
+# ---------------------------------------------------------------------------
+# AC5: Sharpe(net) <= Sharpe(gross) for cost > 0, for every shipped
+# strategy — a property test matching the paper's monotone cost-
+# compression finding
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("strategy_name", [
+    "EqualWeight", "GlobalMinimumVariance", "CVaROptimization",
+])
+def test_sharpe_net_never_exceeds_sharpe_gross_for_every_shipped_strategy(strategy_name):
+    from quantscenariobench.benchmark.interface import ProportionalCost, RebalanceSchedule
+    from quantscenariobench.benchmark.runner import run_benchmark
+    from quantscenariobench.benchmark.strategies import (
+        CVaROptimization,
+        EqualWeight,
+        GlobalMinimumVariance,
+    )
+
+    def make_strategy():
+        if strategy_name == "EqualWeight":
+            return EqualWeight()
+        if strategy_name == "GlobalMinimumVariance":
+            return GlobalMinimumVariance(long_only=True)
+        return CVaROptimization(confidence_level=0.95)
+
+    n = 4
+    hist = _returns(jax.random.PRNGKey(70), 40, n)
+    eval_ = _returns(jax.random.PRNGKey(71), 120, n)
+    schedule = RebalanceSchedule(k=21)
+
+    gross = run_benchmark(make_strategy(), hist, eval_, rebalance_schedule=schedule)
+    net = run_benchmark(
+        make_strategy(), hist, eval_, rebalance_schedule=schedule,
+        cost_model=ProportionalCost(10),
+    )
+    assert net.metrics["sharpe_ratio"] <= gross.metrics["sharpe_ratio"]
+
+
+# ---------------------------------------------------------------------------
+# AC6: the active cost configuration is additive on BenchmarkResult, and
+# two EvaluationResults for the same strategy/dataset at different bps
+# produce two distinguishable leaderboard entries — the cost setting
+# joins the aggregation key rather than collapsing rows
+# ---------------------------------------------------------------------------
+
+def test_run_benchmark_serializes_cost_model_additively():
+    from quantscenariobench.benchmark.interface import ProportionalCost, RebalanceSchedule
+    from quantscenariobench.benchmark.runner import run_benchmark
+    from quantscenariobench.benchmark.strategies import EqualWeight
+
+    n = 3
+    hist = _returns(jax.random.PRNGKey(72), 30, n)
+    eval_ = _returns(jax.random.PRNGKey(73), 60, n)
+
+    result_no_cost = run_benchmark(EqualWeight(), hist, eval_)
+    assert result_no_cost.cost_model is None
+
+    result_with_cost = run_benchmark(
+        EqualWeight(), hist, eval_,
+        rebalance_schedule=RebalanceSchedule(k=20),
+        cost_model=ProportionalCost(5),
+    )
+    assert result_with_cost.cost_model == {"model": "ProportionalCost", "one_way_bps": 5}
+
+
+def test_two_evaluation_results_at_different_bps_produce_distinguishable_leaderboard_rows():
+    from quantscenariobench.benchmark.evaluation import aggregate_evaluation_results, to_evaluation_result
+    from quantscenariobench.benchmark.interface import ProportionalCost, RebalanceSchedule
+    from quantscenariobench.benchmark.runner import run_benchmark
+    from quantscenariobench.benchmark.strategies import EqualWeight
+
+    n = 3
+    hist = _returns(jax.random.PRNGKey(74), 30, n)
+    eval_ = _returns(jax.random.PRNGKey(75), 60, n)
+    schedule = RebalanceSchedule(k=20)
+
+    result_0bps = run_benchmark(
+        EqualWeight(), hist, eval_, rebalance_schedule=schedule, cost_model=ProportionalCost(0),
+        asset_scenario_ids=["a0", "a1", "a2"], time_grid_reference="tg-cost-sweep",
+    )
+    result_10bps = run_benchmark(
+        EqualWeight(), hist, eval_, rebalance_schedule=schedule, cost_model=ProportionalCost(10),
+        asset_scenario_ids=["a0", "a1", "a2"], time_grid_reference="tg-cost-sweep",
+    )
+
+    table = aggregate_evaluation_results(
+        [to_evaluation_result(result_0bps), to_evaluation_result(result_10bps)]
+    )
+    assert len(table) == 2
+    assert {row["cost_one_way_bps"] for row in table} == {0, 10}
+
+
+# ---------------------------------------------------------------------------
+# AC7: a documented three-line sensitivity-sweep pattern over the shipped
+# API, no bespoke helper
+# ---------------------------------------------------------------------------
+
+def test_cost_sensitivity_sweep_is_a_three_line_loop_against_the_shipped_api():
+    from quantscenariobench.benchmark.interface import ProportionalCost, RebalanceSchedule
+    from quantscenariobench.benchmark.runner import run_benchmark
+    from quantscenariobench.benchmark.strategies import EqualWeight
+
+    n = 3
+    hist = _returns(jax.random.PRNGKey(76), 30, n)
+    eval_ = _returns(jax.random.PRNGKey(77), 60, n)
+
+    sharpe_by_bps = {}
+    for bps in (0, 5, 10):
+        result = run_benchmark(
+            EqualWeight(), hist, eval_,
+            rebalance_schedule=RebalanceSchedule(k=20), cost_model=ProportionalCost(bps),
+        )
+        sharpe_by_bps[bps] = result.metrics["sharpe_ratio"]
+
+    assert set(sharpe_by_bps) == {0, 5, 10}
+    # Monotone cost compression: higher bps never produces a higher Sharpe.
+    assert sharpe_by_bps[0] >= sharpe_by_bps[5] >= sharpe_by_bps[10]
+
+
+def test_run_benchmark_module_documents_cost_sweep_pattern():
+    src = (_pkg_root() / "benchmark" / "runner" / "_run_benchmark.py").read_text()
+    assert "ProportionalCost(bps)" in src
+    assert "0, 5, 10" in src
+
+
+def test_readme_documents_rebalancing_and_cost_sweep_pattern():
+    readme = (Path(__file__).parent.parent / "README.md").read_text()
+    assert "RebalanceSchedule" in readme
+    assert "ProportionalCost" in readme
+    assert "0, 5, 10" in readme

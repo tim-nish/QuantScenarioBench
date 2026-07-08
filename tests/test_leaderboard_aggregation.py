@@ -107,7 +107,10 @@ def test_aggregate_evaluation_results_columns_are_metric_names():
 
     assert len(table) == 1
     row = table[0]
-    assert set(row) == {"strategy", "benchmark_dataset", "sortino_ratio", "final_wealth_factor"}
+    assert set(row) == {
+        "strategy", "benchmark_dataset", "cost_one_way_bps",
+        "sortino_ratio", "final_wealth_factor",
+    }
 
 
 def test_aggregate_evaluation_results_uses_latest_result_for_duplicate_combination():
@@ -171,7 +174,10 @@ def test_aggregate_evaluation_results_returns_plain_list_of_dicts():
     for row in table:
         assert isinstance(row, dict)
         for value in row.values():
-            assert isinstance(value, (str, float, int))
+            # None is included for cost_one_way_bps (FR-45, AD-34): the
+            # value is None when the row's EvaluationResult used no cost
+            # model.
+            assert isinstance(value, (str, float, int, type(None)))
 
 
 def test_leaderboard_module_has_no_ui_framework_dependency():
@@ -215,6 +221,7 @@ def test_aggregate_evaluation_results_generic_over_arbitrary_strategy_and_metric
         {
             "strategy": "SomeFutureStrategy",
             "benchmark_dataset": "some-future-dataset",
+            "cost_one_way_bps": None,
             "some_future_metric": 42.0,
         }
     ]
