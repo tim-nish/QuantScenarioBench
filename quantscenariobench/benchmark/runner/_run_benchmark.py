@@ -16,7 +16,7 @@ from typing import Any, Optional, Sequence
 from jaxtyping import Array, Float
 
 from ..interface import BaselineStrategy, BenchmarkResult, ForecastOptimizer
-from ..metrics import DEFAULT_METRICS, MetricFn, validate_metric_registry
+from ..metrics import DEFAULT_METRICS, Metric, MetricContext, MetricFn, validate_metric_registry
 
 
 def _library_version() -> str:
@@ -48,7 +48,7 @@ def run_benchmark(
     evaluation_returns: Float[Array, "t2 n"],
     *,
     forecast: Optional[Float[Array, " n"]] = None,
-    metrics: Sequence[MetricFn] = DEFAULT_METRICS,
+    metrics: Sequence[Metric | MetricFn] = DEFAULT_METRICS,
     asset_scenario_ids: Sequence[str] = (),
     time_grid_reference: str = "",
 ) -> BenchmarkResult:
@@ -82,7 +82,12 @@ def run_benchmark(
     validate_metric_registry(metrics)
 
     portfolio_returns = evaluation_returns @ weights.weights
-    metrics_result = {metric.name: float(metric(portfolio_returns)) for metric in metrics}
+    context = MetricContext(
+        portfolio_returns=portfolio_returns,
+        weights=weights,
+        evaluation_returns=evaluation_returns,
+    )
+    metrics_result = {metric.name: float(metric(context)) for metric in metrics}
 
     return BenchmarkResult(
         strategy_name=type(strategy).__name__,

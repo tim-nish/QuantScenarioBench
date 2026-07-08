@@ -171,3 +171,73 @@ def test_portfolio_weights_shape_matches_n_assets(n_assets):
     weights = dummy.allocate(historical_returns, forecast)
     assert_portfolio_weights_valid(weights, n_assets)
     assert weights.weights.shape == (n_assets,)
+
+
+# ---------------------------------------------------------------------------
+# Story 9.1 (Issue #79) AC8: assert_metric_conforms covers the new Metric
+# protocol the same way assert_baseline_strategy_conforms covers
+# BaselineStrategy/ForecastOptimizer (FR-40, NFR-3 extended)
+# ---------------------------------------------------------------------------
+
+def _dummy_metric_context():
+    from quantscenariobench.benchmark.interface import PortfolioWeights
+    from quantscenariobench.benchmark.metrics import MetricContext
+
+    return MetricContext(
+        portfolio_returns=jnp.array([0.01, -0.02, 0.03]),
+        weights=PortfolioWeights(jnp.array([0.5, 0.5])),
+        evaluation_returns=jnp.ones((3, 2)),
+    )
+
+
+def test_assert_metric_conforms_accepts_a_conforming_metric():
+    from quantscenariobench.benchmark.testing import assert_metric_conforms
+
+    class DummyMetric:
+        name = "dummy_metric"
+        direction = "higher_is_better"
+        params = None
+
+        def __call__(self, context):
+            return jnp.mean(context.portfolio_returns)
+
+    assert_metric_conforms(DummyMetric(), _dummy_metric_context())
+
+
+def test_assert_metric_conforms_rejects_non_scalar_output():
+    from quantscenariobench.benchmark.testing import assert_metric_conforms
+
+    class NonScalarMetric:
+        name = "non_scalar_metric"
+        direction = "higher_is_better"
+        params = None
+
+        def __call__(self, context):
+            return context.portfolio_returns
+
+    with pytest.raises(AssertionError):
+        assert_metric_conforms(NonScalarMetric(), _dummy_metric_context())
+
+
+def test_assert_metric_conforms_rejects_invalid_direction():
+    from quantscenariobench.benchmark.testing import assert_metric_conforms
+
+    class InvalidDirectionMetric:
+        name = "invalid_direction_metric"
+        direction = "sideways"
+        params = None
+
+        def __call__(self, context):
+            return jnp.mean(context.portfolio_returns)
+
+    with pytest.raises(AssertionError):
+        assert_metric_conforms(InvalidDirectionMetric(), _dummy_metric_context())
+
+
+def test_assert_metric_conforms_covers_default_metrics():
+    from quantscenariobench.benchmark.metrics import DEFAULT_METRICS
+    from quantscenariobench.benchmark.testing import assert_metric_conforms
+
+    context = _dummy_metric_context()
+    for metric in DEFAULT_METRICS:
+        assert_metric_conforms(metric, context)

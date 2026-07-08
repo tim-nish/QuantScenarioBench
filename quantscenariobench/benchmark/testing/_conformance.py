@@ -12,6 +12,7 @@ from typing import Any
 import jax.numpy as jnp
 
 from ..interface import BaselineStrategy, ForecastOptimizer, PortfolioWeights
+from ..metrics import Metric, MetricContext
 
 
 def assert_portfolio_weights_valid(weights: Any, n_assets: int) -> None:
@@ -83,3 +84,21 @@ def assert_forecast_optimizer_conforms(
 
     weights_b = optimizer.allocate(historical_returns, forecast)
     assert_deterministic_weights(weights_a, weights_b)
+
+
+def assert_metric_conforms(metric: Metric, context: MetricContext) -> None:
+    """Run the full conformance suite against a Metric (FR-40, AD-31).
+
+    Checks that metric.name is a non-empty str, metric.direction is one
+    of the two Metric.direction literals, and metric(context) returns a
+    scalar array.
+    """
+    assert isinstance(metric.name, str) and metric.name, \
+        f"Metric.name must be a non-empty str, got {metric.name!r}"
+    assert metric.direction in ("higher_is_better", "lower_is_better"), \
+        f"Metric.direction must be 'higher_is_better' or 'lower_is_better', " \
+        f"got {metric.direction!r}"
+
+    value = metric(context)
+    assert jnp.asarray(value).shape == (), \
+        f"metric(context) must return a scalar, got shape {jnp.asarray(value).shape}"

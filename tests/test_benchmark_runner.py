@@ -222,6 +222,7 @@ def test_run_benchmark_with_each_epic5_baseline():
 # ---------------------------------------------------------------------------
 
 def test_run_benchmark_iterates_custom_metrics_registry_generically():
+    from quantscenariobench.benchmark.metrics import wrap_legacy_metric
     from quantscenariobench.benchmark.runner import run_benchmark
     from quantscenariobench.benchmark.strategies import EqualWeight
 
@@ -229,7 +230,10 @@ def test_run_benchmark_iterates_custom_metrics_registry_generically():
         return jnp.sum(returns)
     custom_metric.name = "total_return"
 
-    result = run_benchmark(EqualWeight(), _HIST, _EVAL, metrics=(custom_metric,))
+    result = run_benchmark(
+        EqualWeight(), _HIST, _EVAL,
+        metrics=(wrap_legacy_metric(custom_metric, direction="higher_is_better"),),
+    )
 
     weights = jnp.full((3,), 1.0 / 3)
     expected = float(jnp.sum(_EVAL @ weights))
@@ -238,6 +242,7 @@ def test_run_benchmark_iterates_custom_metrics_registry_generically():
 
 
 def test_run_benchmark_raises_on_duplicate_metric_names():
+    from quantscenariobench.benchmark.metrics import wrap_legacy_metric
     from quantscenariobench.benchmark.runner import run_benchmark
     from quantscenariobench.benchmark.strategies import EqualWeight
 
@@ -250,4 +255,35 @@ def test_run_benchmark_raises_on_duplicate_metric_names():
     metric_b.name = "dup"
 
     with pytest.raises(ValueError):
-        run_benchmark(EqualWeight(), _HIST, _EVAL, metrics=(metric_a, metric_b))
+        run_benchmark(
+            EqualWeight(), _HIST, _EVAL,
+            metrics=(
+                wrap_legacy_metric(metric_a, direction="higher_is_better"),
+                wrap_legacy_metric(metric_b, direction="higher_is_better"),
+            ),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Story 9.1 (Issue #79) AC3: a trivial weight-dependent Metric implementing
+# the new context-aware protocol runs through run_benchmark() with no
+# Runner changes beyond this story (FR-40)
+# ---------------------------------------------------------------------------
+
+def test_run_benchmark_scores_a_weight_dependent_metric():
+    from quantscenariobench.benchmark.runner import run_benchmark
+    from quantscenariobench.benchmark.strategies import EqualWeight
+
+    class SumOfSquaredWeights:
+        name = "sum_of_squared_weights"
+        direction = "lower_is_better"
+        params = None
+
+        def __call__(self, context):
+            return jnp.sum(context.weights.weights ** 2)
+
+    result = run_benchmark(EqualWeight(), _HIST, _EVAL, metrics=(SumOfSquaredWeights(),))
+
+    n_assets = _HIST.shape[1]
+    expected = float(jnp.sum(jnp.full((n_assets,), 1.0 / n_assets) ** 2))
+    assert result.metrics == {"sum_of_squared_weights": pytest.approx(expected)}
