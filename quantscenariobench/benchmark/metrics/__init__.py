@@ -1,4 +1,9 @@
 from ._calmar import annualized_sharpe, calmar_ratio
+from ._concentration import (
+    effective_number_of_assets,
+    herfindahl_index,
+    weight_entropy,
+)
 from ._context import MetricContext
 from ._final_wealth_factor import final_wealth_factor
 from ._max_drawdown import max_drawdown
@@ -16,11 +21,14 @@ __all__ = [
     "annualized_sharpe",
     "calmar_ratio",
     "conditional_value_at_risk",
+    "effective_number_of_assets",
     "final_wealth_factor",
+    "herfindahl_index",
     "max_drawdown",
     "sharpe_ratio",
     "sortino_ratio",
     "validate_metric_registry",
     "value_at_risk",
+    "weight_entropy",
     "wrap_legacy_metric",
 ]

@@ -182,3 +182,34 @@ def test_multi_asset_run_benchmark_records_asset_scenario_ids_and_time_grid_refe
     assert result.asset_scenario_ids == scenario_ids
     assert len(result.asset_scenario_ids) == n_assets
     assert result.time_grid_reference == time_grid_ref
+
+
+# ---------------------------------------------------------------------------
+# Story 9.4 (Issue #82) AC7: herfindahl_index/weight_entropy/
+# effective_number_of_assets values appear in BenchmarkResult.metrics and
+# survive the EvaluationResult JSON round-trip (FR-43)
+# ---------------------------------------------------------------------------
+
+def test_concentration_metrics_survive_evaluation_result_json_round_trip():
+    from quantscenariobench.benchmark.evaluation import EvaluationResult, to_evaluation_result
+    from quantscenariobench.benchmark.metrics import (
+        effective_number_of_assets,
+        herfindahl_index,
+        weight_entropy,
+    )
+    from quantscenariobench.benchmark.strategies import EqualWeight
+
+    result = _run(
+        EqualWeight(),
+        metrics=(herfindahl_index, weight_entropy, effective_number_of_assets),
+    )
+    assert set(result.metrics) == {
+        "herfindahl_index", "weight_entropy", "effective_number_of_assets",
+    }
+
+    evaluation_result = to_evaluation_result(result)
+    payload = json.dumps(dataclasses.asdict(evaluation_result))
+    restored = EvaluationResult.from_dict(json.loads(payload))
+
+    restored_metrics = {m.name: m.value for m in restored.metrics}
+    assert restored_metrics == result.metrics

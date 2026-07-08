@@ -316,3 +316,65 @@ def test_run_benchmark_scores_var_and_cvar_at_two_alpha_levels():
     assert set(result.metrics) == {"var_0.95", "var_0.99", "cvar_0.95", "cvar_0.99"}
     assert result.metrics["cvar_0.95"] >= result.metrics["var_0.95"]
     assert result.metrics["cvar_0.99"] >= result.metrics["var_0.99"]
+
+
+# ---------------------------------------------------------------------------
+# Story 9.4 (Issue #82) AC4: EqualWeight scored via run_benchmark() reports
+# exactly effective_number_of_assets == n for every n tested (FR-43)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("n", [1, 2, 3, 5, 10])
+def test_run_benchmark_equal_weight_effective_number_of_assets_equals_n(n):
+    from quantscenariobench.benchmark.metrics import effective_number_of_assets
+    from quantscenariobench.benchmark.runner import run_benchmark
+    from quantscenariobench.benchmark.strategies import EqualWeight
+
+    hist = _returns(jax.random.PRNGKey(0), 20, n)
+    eval_ = _returns(jax.random.PRNGKey(1), 10, n)
+
+    result = run_benchmark(
+        EqualWeight(), hist, eval_, metrics=(effective_number_of_assets,)
+    )
+    assert result.metrics["effective_number_of_assets"] == pytest.approx(float(n), abs=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Story 9.4 (Issue #82) AC5: GMV (long-only) and CVaROptimization report
+# herfindahl_index strictly between 1/n and 1 on a generic, non-trivial
+# dataset (sanity/property test, FR-43)
+# ---------------------------------------------------------------------------
+
+def test_run_benchmark_gmv_and_cvar_herfindahl_index_strictly_between_1_over_n_and_1():
+    import numpy as np
+
+    from quantscenariobench.benchmark.metrics import herfindahl_index
+    from quantscenariobench.benchmark.runner import run_benchmark
+    from quantscenariobench.benchmark.strategies import CVaROptimization, GlobalMinimumVariance
+
+    # Assets with meaningfully different variances/covariances (and a
+    # volatility scale large enough to avoid the long-only SLSQP solver's
+    # tolerance falsely converging at the equal-weight initial guess on a
+    # near-zero-scale objective) so neither optimizer lands on a trivial
+    # single-asset or accidentally equal-weight allocation.
+    rng = np.random.default_rng(11)
+    t, n = 100, 4
+    vols = np.array([0.05, 0.15, 0.30, 0.50])
+    corr = np.array([
+        [1.00, 0.15, 0.05, -0.05],
+        [0.15, 1.00, 0.25, 0.05],
+        [0.05, 0.25, 1.00, 0.30],
+        [-0.05, 0.05, 0.30, 1.00],
+    ])
+    cov = np.outer(vols, vols) * corr
+    hist = jnp.array(rng.multivariate_normal(np.zeros(n), cov, size=t))
+    eval_ = jnp.array(rng.multivariate_normal(np.zeros(n), cov, size=t))
+
+    for strat in (GlobalMinimumVariance(long_only=True), CVaROptimization(confidence_level=0.95)):
+        result = run_benchmark(strat, hist, eval_, metrics=(herfindahl_index,))
+        weights = strat.allocate(hist).weights
+        assert not jnp.allclose(weights, 1.0 / n), (
+            f"{type(strat).__name__} landed on equal weight — dataset is not a "
+            "meaningful sanity check"
+        )
+        hhi = result.metrics["herfindahl_index"]
+        assert 1.0 / n < hhi < 1.0
