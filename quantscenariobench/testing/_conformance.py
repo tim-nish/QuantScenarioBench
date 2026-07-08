@@ -105,3 +105,36 @@ def assert_market_model_conforms(
     # --- Reproducibility check (FR-4, NFR-1) ---
     scenario_again = simulate_fn(model, time_grid, n_paths, seed)
     assert_reproducible(scenario, scenario_again)
+
+
+def assert_correlated_basket_conforms(
+    simulate_correlated_basket_fn: Callable,
+    models: Any,
+    time_grid: TimeGrid,
+    n_paths: int,
+    seed: int,
+    rho: Any,
+) -> None:
+    """Run the conformance suite against simulate_correlated_basket() (FR-47,
+    AD-36, NFR-2 extended) — mirrors assert_market_model_conforms's schema
+    and reproducibility checks, applied to every constituent Scenario, so
+    a correlated basket's jit/vmap posture (inherited from the same
+    solve_sde/replay_sde machinery simulate() itself uses) and
+    reproducibility guarantee match simulate()'s own (AC8).
+
+    Parameters
+    ----------
+    simulate_correlated_basket_fn:
+        The simulate_correlated_basket() callable (or any compatible
+        implementation). Injected by the caller so this module stays free
+        of api imports (AD-9), mirroring simulate_fn above.
+    """
+    scenarios, _basket_metadata = simulate_correlated_basket_fn(
+        models, time_grid, n_paths, seed, rho
+    )
+    for scenario in scenarios:
+        assert_scenario_schema(scenario)
+
+    scenarios_again, _ = simulate_correlated_basket_fn(models, time_grid, n_paths, seed, rho)
+    for scenario, scenario_again in zip(scenarios, scenarios_again):
+        assert_reproducible(scenario, scenario_again)
