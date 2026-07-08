@@ -841,3 +841,190 @@ def test_calmar_and_annualized_sharpe_are_jit_compatible(factory_name):
     eager = score(returns)
     jitted = jax.jit(score)(returns)
     assert jnp.allclose(eager, jitted)
+
+
+# ===========================================================================
+# Story 9.4 — Concentration & Diversification Metrics: HHI, Shannon Entropy,
+# Effective Number of Assets
+#
+# Covers all acceptance criteria from GitHub Issue #82.
+# ===========================================================================
+
+_CONCENTRATION_TOL = 1e-12
+
+
+def _concentration_context(weights):
+    from quantscenariobench.benchmark.interface import PortfolioWeights
+    from quantscenariobench.benchmark.metrics import MetricContext
+
+    n = len(weights)
+    return MetricContext(
+        portfolio_returns=jnp.zeros(3),
+        weights=PortfolioWeights(jnp.asarray(weights)),
+        evaluation_returns=jnp.ones((3, n)),
+    )
+
+
+# ---------------------------------------------------------------------------
+# AC1: w = (1, 0, ..., 0) => HHI = 1, entropy = 0, ENB = 1, exact to 1e-12
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("n", [1, 2, 3, 5])
+def test_concentration_metrics_fully_concentrated_weights(n):
+    from quantscenariobench.benchmark.metrics import (
+        effective_number_of_assets,
+        herfindahl_index,
+        weight_entropy,
+    )
+
+    weights = [1.0] + [0.0] * (n - 1)
+    context = _concentration_context(weights)
+
+    assert float(herfindahl_index(context)) == pytest.approx(1.0, abs=_CONCENTRATION_TOL)
+    assert float(weight_entropy(context)) == pytest.approx(0.0, abs=_CONCENTRATION_TOL)
+    assert float(effective_number_of_assets(context)) == pytest.approx(1.0, abs=_CONCENTRATION_TOL)
+
+
+# ---------------------------------------------------------------------------
+# AC2: equal weights over n assets => HHI = 1/n, entropy = log(n), ENB = n,
+# exact to 1e-12
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("n", [1, 2, 3, 5, 10])
+def test_concentration_metrics_equal_weights(n):
+    from quantscenariobench.benchmark.metrics import (
+        effective_number_of_assets,
+        herfindahl_index,
+        weight_entropy,
+    )
+
+    context = _concentration_context([1.0 / n] * n)
+
+    assert float(herfindahl_index(context)) == pytest.approx(1.0 / n, abs=_CONCENTRATION_TOL)
+    assert float(weight_entropy(context)) == pytest.approx(math.log(n), abs=_CONCENTRATION_TOL)
+    assert float(effective_number_of_assets(context)) == pytest.approx(
+        float(n), abs=_CONCENTRATION_TOL
+    )
+
+
+# ---------------------------------------------------------------------------
+# AC3: zero-weight components produce no NaN in weight_entropy — the
+# 0 * log(0) = 0 convention is applied jit-safely
+# ---------------------------------------------------------------------------
+
+def test_weight_entropy_has_no_nan_with_zero_weight_components():
+    from quantscenariobench.benchmark.metrics import weight_entropy
+
+    context = _concentration_context([0.5, 0.5, 0.0, 0.0])
+    value = weight_entropy(context)
+    assert not bool(jnp.isnan(value))
+    assert not bool(jnp.isinf(value))
+    assert float(value) == pytest.approx(math.log(2.0), abs=_CONCENTRATION_TOL)
+
+
+def test_weight_entropy_is_jit_safe_with_zero_weight_components():
+    from quantscenariobench.benchmark.interface import PortfolioWeights
+    from quantscenariobench.benchmark.metrics import MetricContext, weight_entropy
+
+    weights_obj = PortfolioWeights(jnp.array([0.5, 0.5, 0.0, 0.0]))
+
+    def score(returns):
+        context = MetricContext(
+            portfolio_returns=returns,
+            weights=weights_obj,
+            evaluation_returns=jnp.ones((3, 4)),
+        )
+        return weight_entropy(context)
+
+    returns = jnp.zeros(3)
+    eager = score(returns)
+    jitted = jax.jit(score)(returns)
+    assert jnp.allclose(eager, jitted)
+    assert not bool(jnp.isnan(jitted))
+
+
+# ---------------------------------------------------------------------------
+# effective_number_of_assets reuses herfindahl_index's computation rather
+# than duplicating sum(w ** 2) (Review Focus)
+# ---------------------------------------------------------------------------
+
+def test_effective_number_of_assets_calls_hhi_internally_not_duplicated():
+    import ast
+
+    src = (_pkg_root() / "benchmark" / "metrics" / "_concentration.py").read_text()
+    tree = ast.parse(src)
+
+    call_method = next(
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "__call__"
+        and any(
+            isinstance(parent, ast.ClassDef) and parent.name == "_EffectiveNumberOfAssets"
+            for parent in ast.walk(tree)
+            if node in ast.walk(parent)
+        )
+    )
+    body_src = ast.get_source_segment(src, call_method)
+
+    # effective_number_of_assets's __call__ must not itself compute a
+    # sum-of-squares (no ** operator) — it must call the shared HHI helper.
+    assert "**" not in body_src
+    assert "_herfindahl_index" in body_src
+
+
+@pytest.mark.parametrize("weights", [
+    [1.0], [0.5, 0.5], [0.7, 0.2, 0.1], [0.25, 0.25, 0.25, 0.25],
+])
+def test_effective_number_of_assets_equals_reciprocal_of_hhi(weights):
+    from quantscenariobench.benchmark.metrics import (
+        effective_number_of_assets,
+        herfindahl_index,
+    )
+
+    context = _concentration_context(weights)
+    hhi = float(herfindahl_index(context))
+    enb = float(effective_number_of_assets(context))
+    assert enb == pytest.approx(1.0 / hhi, abs=_CONCENTRATION_TOL)
+
+
+# ---------------------------------------------------------------------------
+# AC6: docstrings are written time-sequence-first (time-average over a
+# weight sequence, degenerating to today's single buy-and-hold value)
+# ---------------------------------------------------------------------------
+
+def test_concentration_module_docstring_is_time_sequence_first():
+    src = (_pkg_root() / "benchmark" / "metrics" / "_concentration.py").read_text()
+    assert "time-average" in src or "time average" in src
+    assert "sequence" in src
+
+
+# ---------------------------------------------------------------------------
+# concentration metrics are Story 9.1 Metric instances, read only
+# context.weights, and are never added to DEFAULT_METRICS (AC7, AD-32)
+# ---------------------------------------------------------------------------
+
+def test_concentration_metrics_are_metric_instances_with_expected_direction():
+    from quantscenariobench.benchmark.metrics import (
+        Metric,
+        effective_number_of_assets,
+        herfindahl_index,
+        weight_entropy,
+    )
+
+    assert isinstance(herfindahl_index, Metric)
+    assert isinstance(weight_entropy, Metric)
+    assert isinstance(effective_number_of_assets, Metric)
+
+    assert herfindahl_index.direction == "lower_is_better"
+    assert weight_entropy.direction == "higher_is_better"
+    assert effective_number_of_assets.direction == "higher_is_better"
+
+
+def test_default_metrics_unchanged_by_concentration_metrics():
+    from quantscenariobench.benchmark.metrics import DEFAULT_METRICS
+
+    names = {metric.name for metric in DEFAULT_METRICS}
+    assert names == {
+        "sharpe_ratio", "sortino_ratio", "max_drawdown", "final_wealth_factor",
+    }
+    assert not names & {"herfindahl_index", "weight_entropy", "effective_number_of_assets"}
