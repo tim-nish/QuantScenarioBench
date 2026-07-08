@@ -266,7 +266,7 @@ print(result.metrics)
 ```
 
 - **Portfolio Optimizer Interface** (`quantscenariobench.benchmark.interface`) — `BaselineStrategy` (`allocate(historical_returns)`) and `ForecastOptimizer` (`allocate(historical_returns, forecast)`), both `equinox.Module` ABCs, plus a validated `PortfolioWeights` type (long-only, sums to 1).
-- **Traditional baselines** (`quantscenariobench.benchmark.strategies`) — `EqualWeight`, `GlobalMinimumVariance(long_only=...)`, `CVaROptimization(confidence_level=...)`.
+- **Traditional baselines** (`quantscenariobench.benchmark.strategies`) — `EqualWeight`, `GlobalMinimumVariance(long_only=...)`, `CVaROptimization(confidence_level=...)`, `HierarchicalRiskParity(linkage_method=...)` (covariance-robust, no matrix inversion — López de Prado's tree-clustering/quasi-diagonalization/recursive-bisection algorithm).
 - **Metrics** (`quantscenariobench.benchmark.metrics`) — `sharpe_ratio`, `sortino_ratio`, `max_drawdown`, `final_wealth_factor`, assembled in `DEFAULT_METRICS`; all pure `jax.numpy` functions with defined sentinel behavior on degenerate input (e.g. zero variance).
 - **`run_benchmark()`** (`quantscenariobench.benchmark.runner`) fits the strategy once (static buy-and-hold), applies its weights across `evaluation_returns`, and returns a JSON-serializable `BenchmarkResult` (`strategy_name`, `strategy_parameters`, `metrics`, `asset_scenario_ids`, `time_grid_reference`, `library_version`, `generated_at`).
 - A conformance test suite (`quantscenariobench.benchmark.testing`) verifies a custom `BaselineStrategy`/`ForecastOptimizer` implementation against the interface, with zero changes to `run_benchmark()`.
