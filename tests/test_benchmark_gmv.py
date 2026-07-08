@@ -44,16 +44,26 @@ _SCIPY_IMPORT = re.compile(r"(?:import|from)\s+scipy\b")
 
 
 def test_solver_is_the_only_benchmark_module_importing_scipy():
+    # Story 10.3 (AD-35) introduces one deliberate, bounded second
+    # exception: quantscenariobench.benchmark.evaluation._compare_strategies
+    # imports scipy.stats for paired significance testing (ttest_rel,
+    # wilcoxon), which has no jax.numpy-native equivalent — documented
+    # explicitly in that module's own docstring, not a silent violation.
+    _SANCTIONED_SECOND_EXCEPTION = "_compare_strategies.py"
+
     benchmark_root = _pkg_root() / "benchmark"
     violations = []
     for py_file in benchmark_root.rglob("*.py"):
         if py_file.parent.name == "solver":
             continue
+        if py_file.name == _SANCTIONED_SECOND_EXCEPTION:
+            continue
         if _SCIPY_IMPORT.search(py_file.read_text()):
             violations.append(str(py_file.relative_to(_pkg_root().parent)))
     assert not violations, (
-        f"AD-14 violation: only quantscenariobench.benchmark.solver may "
-        f"import scipy: {violations}"
+        f"AD-14 violation: only quantscenariobench.benchmark.solver (and "
+        f"the Story 10.3/AD-35 {_SANCTIONED_SECOND_EXCEPTION} exception) "
+        f"may import scipy: {violations}"
     )
 
 

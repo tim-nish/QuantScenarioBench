@@ -108,5 +108,13 @@ def aggregate_evaluation_results(results: Sequence[EvaluationResult]) -> list[di
         }
         for metric in result.metrics:
             row[metric.name] = metric.value
+        # metrics_distribution (FR-46, AD-35) is additive: present only
+        # for a distributional (n_repeats > 1) EvaluationResult, absent
+        # for every other row — this is what "mixed old/new rendering"
+        # means at this layer (no reshaping, no derived/formatted
+        # columns here; row[metric.name] stays the plain mean either
+        # way, so ranking and every existing consumer are unaffected).
+        if result.metrics_distribution is not None:
+            row["metrics_distribution"] = result.metrics_distribution
         rows.append(row)
     return rows

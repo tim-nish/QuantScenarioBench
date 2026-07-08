@@ -27,6 +27,14 @@ class BenchmarkResult:
     cost model was supplied — the same plain-dict, not-a-typed-reference
     posture as rebalance_schedule, for the same backward-compatible-load
     reason (AC1).
+
+    metrics_distribution is additive (FR-46, AD-35): produced only by
+    run_benchmark_distributional() with n_repeats > 1 — per-metric
+    {mean, std, ci_low, ci_high, n_repeats, values}, or None for every
+    single-path run_benchmark() result and every n_repeats=1
+    distributional run (which collapses to an ordinary result, AC1).
+    metrics itself stays the per-metric mean in both cases — every
+    existing metrics/Leaderboard consumer keeps working unchanged.
     """
 
     strategy_name: str
@@ -38,3 +46,4 @@ class BenchmarkResult:
     generated_at: str
     rebalance_schedule: Optional[dict] = None
     cost_model: Optional[dict] = None
+    metrics_distribution: Optional[dict] = None

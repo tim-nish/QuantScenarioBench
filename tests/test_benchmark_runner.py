@@ -430,11 +430,12 @@ def test_run_benchmark_default_rebalance_schedule_matches_golden_result(strategy
     actual.pop("generated_at")
     actual.pop("library_version")
 
-    # rebalance_schedule/cost_model are both additive: absent from the
-    # golden fixture (captured before Story 10.1/10.2), present as None
-    # on the fresh result.
+    # rebalance_schedule/cost_model/metrics_distribution are all
+    # additive: absent from the golden fixture (captured before Story
+    # 10.1/10.2/10.3), present as None on the fresh result.
     assert actual.pop("rebalance_schedule") is None
     assert actual.pop("cost_model") is None
+    assert actual.pop("metrics_distribution") is None
     assert actual == golden
 
 
@@ -461,6 +462,7 @@ def test_run_benchmark_explicit_k_none_rebalance_schedule_matches_golden_result(
     # golden fixture bit-for-bit either way).
     assert actual.pop("rebalance_schedule") == {"k": None}
     assert actual.pop("cost_model") is None
+    assert actual.pop("metrics_distribution") is None
     assert actual == golden
 
 
