@@ -30,6 +30,7 @@ REQUIRED_BENCHMARK_RESULT_FIELDS = frozenset({
     "library_version",
     "generated_at",
     "rebalance_schedule",
+    "cost_model",
 })
 
 

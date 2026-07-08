@@ -26,6 +26,7 @@ from ..interface import (
     ForecastOptimizer,
     PolicyStrategy,
     PortfolioWeights,
+    ProportionalCost,
     RebalanceSchedule,
 )
 from ..metrics import DEFAULT_METRICS, Metric, MetricContext, MetricFn, validate_metric_registry
@@ -60,7 +61,8 @@ def _run_rebalancing_loop(
     evaluation_returns: Float[Array, "t2 n"],
     forecast: Optional[Float[Array, " n"]],
     k: int,
-) -> Tuple[Float[Array, " t2"], List[PortfolioWeights]]:
+    cost_model: Optional[ProportionalCost],
+) -> Tuple[Float[Array, " t2"], List[PortfolioWeights], List[Float[Array, " n"]]]:
     """The periodic rebalancing loop (AD-33, FR-44) — a Python for loop,
     not lax.scan, since some BaselineStrategy refits call into the
     scipy-backed Optimizer Solver Layer, already outside jit today
@@ -82,6 +84,19 @@ def _run_rebalancing_loop(
     fraction every step, so the effective weight drifts with each
     asset's relative performance within the holding period
     [t_i, t_{i+1}) until the next rebalance resets it.
+
+    Transaction costs (FR-45, AD-34): at every rebalance after the first,
+    the trade is w_target (the freshly allocated weight) minus w_drifted
+    (the pre-trade drifted weight — the effective weight at the end of
+    the previous holding period). When cost_model is set, that
+    rebalance's cost is deducted directly from the gross portfolio return
+    realized on the rebalance day, producing the net series every Metric
+    then scores unchanged — the cost deduction happens once, here, never
+    inside any Metric/MetricFn. The first rebalance (t_0) never carries a
+    cost: there is no prior position to trade out of. drifted_weights
+    (returned alongside weight_sequence) is the same list the turnover
+    Metric reads via MetricContext.auxiliary — one entry per rebalance
+    after the first, aligned with weight_sequence[1:].
     """
     if isinstance(strategy, PolicyStrategy):
         if forecast is not None:
@@ -118,6 +133,10 @@ def _run_rebalancing_loop(
 
     portfolio_return_segments = []
     weight_sequence: List[PortfolioWeights] = []
+    drifted_weights: List[Float[Array, " n"]] = []
+    rebalance_costs: List[Tuple[int, Float[Array, ""]]] = []
+    previous_drifted: Optional[Float[Array, " n"]] = None
+
     for idx, t_i in enumerate(rebalance_starts):
         t_next = rebalance_starts[idx + 1] if idx + 1 < len(rebalance_starts) else t2
 
@@ -125,6 +144,14 @@ def _run_rebalancing_loop(
             [historical_returns, evaluation_returns[:t_i]], axis=0
         )
         weights = allocate(returns_so_far)
+
+        if previous_drifted is not None:
+            drifted_weights.append(previous_drifted)
+            if cost_model is not None:
+                rebalance_costs.append(
+                    (t_i, cost_model.cost(weights.weights, previous_drifted))
+                )
+
         weight_sequence.append(weights)
 
         period_returns = evaluation_returns[t_i:t_next]
@@ -136,8 +163,16 @@ def _run_rebalancing_loop(
         )
         portfolio_return_segments.append(portfolio_wealth / portfolio_wealth_prev - 1.0)
 
+        previous_drifted = asset_wealth[-1] / portfolio_wealth[-1]
+
     portfolio_returns = jnp.concatenate(portfolio_return_segments)
-    return portfolio_returns, weight_sequence
+
+    if rebalance_costs:
+        cost_indices = jnp.array([index for index, _ in rebalance_costs])
+        cost_values = jnp.stack([cost for _, cost in rebalance_costs])
+        portfolio_returns = portfolio_returns.at[cost_indices].add(-cost_values)
+
+    return portfolio_returns, weight_sequence, drifted_weights
 
 
 def run_benchmark(
@@ -150,6 +185,7 @@ def run_benchmark(
     asset_scenario_ids: Sequence[str] = (),
     time_grid_reference: str = "",
     rebalance_schedule: Optional[RebalanceSchedule] = None,
+    cost_model: Optional[ProportionalCost] = None,
 ) -> BenchmarkResult:
     """Run the full returns -> strategy -> weights -> portfolio returns ->
     metrics -> BenchmarkResult pipeline for a single strategy (FR-27, FR-44).
@@ -162,6 +198,8 @@ def run_benchmark(
     identical to the pre-Story-10.1 implementation whenever
     rebalance_schedule is None or rebalance_schedule.k is None, so every
     previously published BenchmarkResult stays reproducible (AC1, AD-33).
+    cost_model has no effect on this path: buy-and-hold has no rebalance
+    trades to cost.
 
     rebalance_schedule.k=<int> (AD-33, FR-44) — periodic rebalancing via
     _run_rebalancing_loop: the strategy is refit every k evaluation steps
@@ -172,6 +210,14 @@ def run_benchmark(
     evolve with each asset's relative performance until the next
     rebalance resets them — the literature-default convention, chosen
     explicitly over the simpler reset-every-step alternative (AC4).
+
+    cost_model=None (the default, FR-45, AD-34) skips cost computation
+    entirely — required for bit-for-bit legacy behavior (AC1); a
+    ProportionalCost(one_way_bps), including one_way_bps=0, nets each
+    rebalance's transaction cost out of that rebalance day's portfolio
+    return, scored by every Metric with zero metric-side changes.
+    Sensitivity sweeps across bps are a plain loop over this argument:
+    `for bps in (0, 5, 10): run_benchmark(strategy, ..., rebalance_schedule=RebalanceSchedule(k=21), cost_model=ProportionalCost(bps))`.
 
     Dispatch (AD-23, AD-33): a ForecastOptimizer requires forecast and is
     called as allocate(historical_returns, forecast); a BaselineStrategy
@@ -207,13 +253,15 @@ def run_benchmark(
     else:
         validate_metric_registry(metrics)
 
-        portfolio_returns, weight_sequence = _run_rebalancing_loop(
-            strategy, historical_returns, evaluation_returns, forecast, rebalance_schedule.k
+        portfolio_returns, weight_sequence, drifted_weights = _run_rebalancing_loop(
+            strategy, historical_returns, evaluation_returns, forecast,
+            rebalance_schedule.k, cost_model,
         )
         context = MetricContext(
             portfolio_returns=portfolio_returns,
             weights=weight_sequence,
             evaluation_returns=evaluation_returns,
+            auxiliary={"drifted_weights": drifted_weights},
         )
 
     metrics_result = {metric.name: float(metric(context)) for metric in metrics}
@@ -228,5 +276,9 @@ def run_benchmark(
         generated_at=_utc_now(),
         rebalance_schedule=(
             dataclasses.asdict(rebalance_schedule) if rebalance_schedule is not None else None
+        ),
+        cost_model=(
+            {"model": type(cost_model).__name__, **dataclasses.asdict(cost_model)}
+            if cost_model is not None else None
         ),
     )

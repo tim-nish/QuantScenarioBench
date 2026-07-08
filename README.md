@@ -255,6 +255,37 @@ print(result.metrics)
 - **Annualization** is opt-in and uses one documented convention: `periods_per_year=252`, applied only by metrics whose name says `_annualized_<N>` (e.g. `annualized_sharpe(252)` → `sharpe_ratio_annualized_252`) or that otherwise take `periods_per_year` as an explicit parameter (e.g. `calmar_ratio`). These are never silently added to `DEFAULT_METRICS` — always opt-in.
 - **Compounding** for drawdown/Calmar/wealth-factor metrics (`max_drawdown`, `calmar_ratio`, `final_wealth_factor`) is via `cumprod(1 + returns)`, with wealth(0) implicit at 1.0.
 
+### Periodic Rebalancing & Transaction Costs
+
+By default `run_benchmark()` fits a strategy once and holds its weights unchanged (buy-and-hold). Pass a `RebalanceSchedule` to refit periodically instead:
+
+```python
+from quantscenariobench.benchmark.interface import ProportionalCost, RebalanceSchedule
+from quantscenariobench.benchmark.metrics import turnover
+
+result = run_benchmark(
+    strategy, historical_returns, evaluation_returns,
+    rebalance_schedule=RebalanceSchedule(k=21),          # refit every 21 evaluation steps
+    cost_model=ProportionalCost(one_way_bps=10),          # 10 bps one-way transaction cost, opt-in
+    metrics=(*DEFAULT_METRICS, turnover),
+)
+```
+
+- Between rebalances, weights **drift** with relative asset performance (not reset every step) — the literature-default convention.
+- `cost_model=None` (the default) means no transaction costs and is bit-identical to a run with no cost model at all; `ProportionalCost(0)` is a distinct, explicit zero-cost configuration with the same numeric result.
+- A minimal `PolicyStrategy` (`allocate_sequence(observed_returns)`, called once per rebalance date) lets a time-varying policy participate in the same pipeline as `BaselineStrategy`/`ForecastOptimizer`.
+- A cost sensitivity sweep (mirroring the paper's bps grid) is a plain loop over the shipped API — no bespoke helper:
+
+```python
+for bps in (0, 5, 10):
+    result = run_benchmark(
+        strategy, historical_returns, evaluation_returns,
+        rebalance_schedule=RebalanceSchedule(k=21), cost_model=ProportionalCost(bps),
+    )
+```
+
+- The active `rebalance_schedule`/`cost_model` are recorded on `BenchmarkResult`/`EvaluationResult` (additive fields) and join the Leaderboard aggregation key, so results at different `bps` never collapse into the same row.
+
 ### Implementing a custom strategy
 
 ```python

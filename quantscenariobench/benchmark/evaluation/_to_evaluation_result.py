@@ -32,6 +32,7 @@ def _result_id(result: BenchmarkResult) -> str:
             "library_version": result.library_version,
             "generated_at": result.generated_at,
             "rebalance_schedule": result.rebalance_schedule,
+            "cost_model": result.cost_model,
         },
         sort_keys=True,
     )
@@ -64,4 +65,5 @@ def to_evaluation_result(result: BenchmarkResult) -> EvaluationResult:
         library_version=result.library_version,
         generated_at=result.generated_at,
         rebalance_schedule=result.rebalance_schedule,
+        cost_model=result.cost_model,
     )

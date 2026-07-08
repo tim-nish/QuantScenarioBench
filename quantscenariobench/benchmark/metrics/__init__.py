@@ -12,6 +12,7 @@ from ._registry import DEFAULT_METRICS, validate_metric_registry
 from ._sharpe import sharpe_ratio
 from ._sortino import sortino_ratio
 from ._tail_risk import conditional_value_at_risk, value_at_risk
+from ._turnover import turnover, turnover_annualized
 
 __all__ = [
     "DEFAULT_METRICS",
@@ -27,6 +28,8 @@ __all__ = [
     "max_drawdown",
     "sharpe_ratio",
     "sortino_ratio",
+    "turnover",
+    "turnover_annualized",
     "validate_metric_registry",
     "value_at_risk",
     "weight_entropy",
