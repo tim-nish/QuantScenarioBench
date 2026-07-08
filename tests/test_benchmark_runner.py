@@ -287,3 +287,32 @@ def test_run_benchmark_scores_a_weight_dependent_metric():
     n_assets = _HIST.shape[1]
     expected = float(jnp.sum(jnp.full((n_assets,), 1.0 / n_assets) ** 2))
     assert result.metrics == {"sum_of_squared_weights": pytest.approx(expected)}
+
+
+# ---------------------------------------------------------------------------
+# Story 9.2 (Issue #80) AC5: value_at_risk/conditional_value_at_risk at two
+# alpha levels registered together both appear in BenchmarkResult.metrics
+# under distinct names (FR-41)
+# ---------------------------------------------------------------------------
+
+def test_run_benchmark_scores_var_and_cvar_at_two_alpha_levels():
+    from quantscenariobench.benchmark.metrics import (
+        conditional_value_at_risk,
+        value_at_risk,
+    )
+    from quantscenariobench.benchmark.runner import run_benchmark
+    from quantscenariobench.benchmark.strategies import EqualWeight
+
+    result = run_benchmark(
+        EqualWeight(), _HIST, _EVAL,
+        metrics=(
+            value_at_risk(0.95),
+            value_at_risk(0.99),
+            conditional_value_at_risk(0.95),
+            conditional_value_at_risk(0.99),
+        ),
+    )
+
+    assert set(result.metrics) == {"var_0.95", "var_0.99", "cvar_0.95", "cvar_0.99"}
+    assert result.metrics["cvar_0.95"] >= result.metrics["var_0.95"]
+    assert result.metrics["cvar_0.99"] >= result.metrics["var_0.99"]

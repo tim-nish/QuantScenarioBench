@@ -179,3 +179,45 @@ def test_cvar_optimization_passes_conformance_suite():
 
     strat = CVaROptimization(confidence_level=0.95)
     assert_baseline_strategy_conforms(strat, _sample_returns())
+
+
+# ---------------------------------------------------------------------------
+# Story 9.2 (Issue #80) AC6: on a fat-tailed synthetic dataset,
+# CVaROptimization achieves a lower (better) cvar_0.95 than EqualWeight —
+# a smoke test confirming the solver's LP formulation (AD-14) and this
+# story's closed-form cvar_0.95 metric agree on the same convention (FR-41)
+# ---------------------------------------------------------------------------
+
+def _fat_tailed_two_asset_returns(seed: int) -> np.ndarray:
+    """Asset 0 has rare, severe crashes (fat left tail); Asset 1 is stable.
+
+    A CVaR-minimizing allocator should tilt away from Asset 0's crash
+    risk, unlike EqualWeight's fixed 50/50 split.
+    """
+    rng = np.random.default_rng(seed)
+    t = 60
+    asset_0 = rng.normal(0.001, 0.01, t)
+    crashes = rng.random(t) < 0.1
+    asset_0 = np.where(crashes, asset_0 - 0.15, asset_0)
+    asset_1 = rng.normal(0.0005, 0.005, t)
+    return np.column_stack([asset_0, asset_1])
+
+
+def test_cvar_optimization_beats_equal_weight_on_cvar_0_95_fat_tailed_dataset():
+    from quantscenariobench.benchmark.metrics import conditional_value_at_risk
+    from quantscenariobench.benchmark.runner import run_benchmark
+    from quantscenariobench.benchmark.strategies import CVaROptimization, EqualWeight
+
+    historical_returns = jnp.array(_fat_tailed_two_asset_returns(seed=42))
+    evaluation_returns = jnp.array(_fat_tailed_two_asset_returns(seed=123))
+    metrics = (conditional_value_at_risk(0.95),)
+
+    cvar_result = run_benchmark(
+        CVaROptimization(confidence_level=0.95),
+        historical_returns, evaluation_returns, metrics=metrics,
+    )
+    equal_weight_result = run_benchmark(
+        EqualWeight(), historical_returns, evaluation_returns, metrics=metrics,
+    )
+
+    assert cvar_result.metrics["cvar_0.95"] < equal_weight_result.metrics["cvar_0.95"]
