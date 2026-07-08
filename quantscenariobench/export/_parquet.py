@@ -9,13 +9,13 @@ from __future__ import annotations
 import dataclasses
 import json
 from pathlib import Path
-from typing import Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from ..interface import Scenario
+from ..interface import BasketMetadata, Scenario
 
 # The ten Metadata fields mandated by AD-8.
 _METADATA_FIELDS = (
@@ -57,7 +57,16 @@ def _serialize_time_grid(tg: object) -> str:
     return json.dumps(np.array(tg.t).tolist())  # type: ignore[attr-defined]
 
 
-def export_parquet(scenarios: Sequence[Scenario], path: str | Path) -> None:
+def _serialize_rho(rho: object) -> str:
+    """JSON-encode a basket correlation matrix."""
+    return json.dumps(np.asarray(rho).tolist())
+
+
+def export_parquet(
+    scenarios: Sequence[Scenario],
+    path: str | Path,
+    basket_metadata: Optional[BasketMetadata] = None,
+) -> None:
     """Export a batch of Scenarios to a single Parquet file.
 
     One row per simulation path. Columns:
@@ -72,17 +81,37 @@ def export_parquet(scenarios: Sequence[Scenario], path: str | Path) -> None:
     The column set is identical across all v1 Market Models (FR-13) — only the
     content of ``latent_state`` and ``parameters`` differs between models.
 
+    basket_metadata is additive (FR-47, AD-36): when supplied (a
+    quantscenariobench.interface.BasketMetadata from
+    simulate_correlated_basket()), three further columns are added —
+    ``basket_rho`` (JSON-encoded correlation matrix), ``basket_seed``, and
+    ``basket_constituents`` (JSON-encoded constituent identifier list) —
+    the same basket-wide value repeated on every row, mirroring how
+    per-scenario Metadata is already repeated per path. When
+    basket_metadata is None (the default), the exported column set is
+    byte-for-byte unchanged from before this parameter existed.
+
     Parameters
     ----------
     scenarios:
         One or more :class:`~quantscenariobench.interface.Scenario` objects,
-        as returned by :func:`~quantscenariobench.api.simulate`.
+        as returned by :func:`~quantscenariobench.api.simulate` or
+        :func:`~quantscenariobench.api.simulate_correlated_basket`.
     path:
         Destination file path for the Parquet output.
+    basket_metadata:
+        Optional basket-level provenance record to embed additively.
     """
     obs_rows: list[list[float]] = []
     lat_rows: list[list[float]] = []
     meta_cols: dict[str, list] = {f: [] for f in _METADATA_FIELDS}
+    basket_cols: dict[str, list] = {
+        "basket_rho": [], "basket_seed": [], "basket_constituents": [],
+    }
+
+    if basket_metadata is not None:
+        basket_rho_json = _serialize_rho(basket_metadata.rho)
+        basket_constituents_json = json.dumps(basket_metadata.constituents)
 
     for scenario in scenarios:
         obs = np.array(scenario.observation)    # (n_paths, T)
@@ -107,21 +136,31 @@ def export_parquet(scenarios: Sequence[Scenario], path: str | Path) -> None:
             meta_cols["library_version"].append(meta.library_version)
             meta_cols["dataset_version"].append(meta.dataset_version)
             meta_cols["generated_at"].append(meta.generated_at)
+            if basket_metadata is not None:
+                basket_cols["basket_rho"].append(basket_rho_json)
+                basket_cols["basket_seed"].append(basket_metadata.basket_seed)
+                basket_cols["basket_constituents"].append(basket_constituents_json)
 
-    table = pa.table(
-        {
-            "observation": pa.array(obs_rows, type=pa.list_(pa.float64())),
-            "latent_state": pa.array(lat_rows, type=pa.list_(pa.float64())),
-            "seed": pa.array(meta_cols["seed"], type=pa.int64()),
-            "prng_key_info": pa.array(meta_cols["prng_key_info"], type=pa.string()),
-            "model_name": pa.array(meta_cols["model_name"], type=pa.string()),
-            "model_version": pa.array(meta_cols["model_version"], type=pa.string()),
-            "parameters": pa.array(meta_cols["parameters"], type=pa.string()),
-            "time_grid": pa.array(meta_cols["time_grid"], type=pa.string()),
-            "n_paths": pa.array(meta_cols["n_paths"], type=pa.int64()),
-            "library_version": pa.array(meta_cols["library_version"], type=pa.string()),
-            "dataset_version": pa.array(meta_cols["dataset_version"], type=pa.string()),
-            "generated_at": pa.array(meta_cols["generated_at"], type=pa.string()),
-        }
-    )
+    columns = {
+        "observation": pa.array(obs_rows, type=pa.list_(pa.float64())),
+        "latent_state": pa.array(lat_rows, type=pa.list_(pa.float64())),
+        "seed": pa.array(meta_cols["seed"], type=pa.int64()),
+        "prng_key_info": pa.array(meta_cols["prng_key_info"], type=pa.string()),
+        "model_name": pa.array(meta_cols["model_name"], type=pa.string()),
+        "model_version": pa.array(meta_cols["model_version"], type=pa.string()),
+        "parameters": pa.array(meta_cols["parameters"], type=pa.string()),
+        "time_grid": pa.array(meta_cols["time_grid"], type=pa.string()),
+        "n_paths": pa.array(meta_cols["n_paths"], type=pa.int64()),
+        "library_version": pa.array(meta_cols["library_version"], type=pa.string()),
+        "dataset_version": pa.array(meta_cols["dataset_version"], type=pa.string()),
+        "generated_at": pa.array(meta_cols["generated_at"], type=pa.string()),
+    }
+    if basket_metadata is not None:
+        columns["basket_rho"] = pa.array(basket_cols["basket_rho"], type=pa.string())
+        columns["basket_seed"] = pa.array(basket_cols["basket_seed"], type=pa.int64())
+        columns["basket_constituents"] = pa.array(
+            basket_cols["basket_constituents"], type=pa.string()
+        )
+
+    table = pa.table(columns)
     pq.write_table(table, Path(path))

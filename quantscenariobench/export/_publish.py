@@ -196,6 +196,7 @@ def publish_to_hub(
     *,
     token: str | None = None,
     commit_message: str = "Upload QuantScenarioBench benchmark dataset",
+    basket_metadata=None,
 ) -> str:
     """Publish a batch of Scenarios to the Hugging Face Hub as a dataset.
 
@@ -215,6 +216,13 @@ def publish_to_hub(
         a prior ``huggingface-cli login`` session if ``None``.
     commit_message:
         Commit message recorded in the Hub repository.
+    basket_metadata:
+        Optional :class:`~quantscenariobench.interface.BasketMetadata` from
+        :func:`~quantscenariobench.api.simulate_correlated_basket` (FR-47,
+        AD-36) — forwarded additively to :func:`export_parquet` so it
+        survives Hub publish/reload unchanged. None (the default) leaves
+        the uploaded Parquet schema exactly as before this parameter
+        existed.
 
     Returns
     -------
@@ -245,7 +253,7 @@ def publish_to_hub(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         parquet_path = Path(tmpdir) / "train.parquet"
-        export_parquet(scenarios, parquet_path)
+        export_parquet(scenarios, parquet_path, basket_metadata=basket_metadata)
 
         api.upload_file(
             path_or_fileobj=str(parquet_path),

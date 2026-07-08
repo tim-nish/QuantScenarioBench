@@ -215,3 +215,53 @@ def test_gmv_passes_conformance_suite(long_only):
 
     strat = GlobalMinimumVariance(long_only=long_only)
     assert_baseline_strategy_conforms(strat, _correlated_returns())
+
+
+# ---------------------------------------------------------------------------
+# Story 11.1 (Issue #86) AC6: on a strongly correlated 2-block
+# CorrelatedBasket, GMV exploits the block structure with lower portfolio
+# variance than EqualWeight — an end-to-end proof that correlation
+# reaches the benchmark layer (FR-47)
+# ---------------------------------------------------------------------------
+
+def test_gmv_exploits_correlated_basket_block_structure_vs_equal_weight():
+    from quantscenariobench.api import simulate_correlated_basket
+    from quantscenariobench.benchmark.returns import compose_returns
+    from quantscenariobench.benchmark.strategies import EqualWeight, GlobalMinimumVariance
+    from quantscenariobench.interface import TimeGrid
+    from quantscenariobench.models import BlackScholes
+
+    time_grid = TimeGrid(jnp.linspace(0.0, 1.0, 60))
+    # Two highly-correlated pairs (assets 0-1, assets 2-3), pairs mutually
+    # uncorrelated; the second member of each pair has meaningfully higher
+    # volatility than the first, so a genuine (non-equal-weight) long-only
+    # GMV optimum exists to exploit.
+    models = [
+        BlackScholes(mu=0.05, sigma=0.9, S0=100.0),
+        BlackScholes(mu=0.05, sigma=1.1, S0=100.0),
+        BlackScholes(mu=0.05, sigma=0.5, S0=100.0),
+        BlackScholes(mu=0.05, sigma=0.6, S0=100.0),
+    ]
+    rho = jnp.array([
+        [1.0, 0.9, 0.0, 0.0],
+        [0.9, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.9],
+        [0.0, 0.0, 0.9, 1.0],
+    ])
+    scenarios, _ = simulate_correlated_basket(
+        models, time_grid, n_paths=1000, seed=3, rho=rho
+    )
+    returns = compose_returns(scenarios, path_index=0)
+    historical_returns, evaluation_returns = returns[:30], returns[30:]
+
+    gmv = GlobalMinimumVariance(long_only=True)
+    gmv_weights = gmv.allocate(historical_returns).weights
+    equal_weights = jnp.full(4, 0.25)
+
+    assert not jnp.allclose(gmv_weights, equal_weights), (
+        "GMV landed on equal weight — dataset is not a meaningful sanity check"
+    )
+
+    gmv_variance = float(jnp.var(evaluation_returns @ gmv_weights))
+    equal_weight_variance = float(jnp.var(evaluation_returns @ equal_weights))
+    assert gmv_variance < equal_weight_variance

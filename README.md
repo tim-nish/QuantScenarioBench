@@ -188,6 +188,29 @@ where $W^H_t$ is a Riemann–Liouville fractional Brownian motion with Hurst exp
 
 ---
 
+## Correlated Multi-Asset Scenarios
+
+Independently-simulated assets have near-zero expected correlation, which makes GMV/CVaR/HRP-style strategies degenerate toward Equal Weight. `simulate_correlated_basket()` simulates N single-asset models with Brownian increments correlated by a validated N×N correlation matrix ρ, giving benchmark strategies genuine cross-asset structure to exploit:
+
+```python
+import jax.numpy as jnp
+from quantscenariobench.api import simulate_correlated_basket
+from quantscenariobench.interface import TimeGrid
+from quantscenariobench.models import BlackScholes
+
+models = [BlackScholes(mu=0.05, sigma=0.2, S0=100.0), BlackScholes(mu=0.03, sigma=0.15, S0=50.0)]
+rho = jnp.array([[1.0, 0.7], [0.7, 1.0]])
+
+scenarios, basket_metadata = simulate_correlated_basket(models, TimeGrid(jnp.linspace(0.0, 1.0, 253)), n_paths=50_000, seed=1, rho=rho)
+```
+
+- `scenarios` is exactly `list[Scenario]` — the same schema `compose_returns`/`export_parquet`/`publish_to_hub` already accept, unchanged.
+- `basket_metadata` (a `BasketMetadata`) additively records ρ, the basket seed, and constituent identifiers; pass it to `export_parquet(scenarios, path, basket_metadata=basket_metadata)` to have it survive export/Hub-publish/reload.
+- ρ must be symmetric, unit-diagonal, and positive semi-definite — validated before any simulation runs. ρ = identity reproduces N independent draws bit-identically (a documented seed-derivation rule: `jax.random.split(PRNGKey(seed), N)` gives each asset's sub-key).
+- Correlation is applied to each asset's price-driving noise; a model's own internal driver (e.g. Heston's price/variance correlation) is unaffected. `BlackScholes`/`Heston` constituents are supported in v1; `RoughBergomi` (non-Markovian) raises `NotImplementedError`.
+
+---
+
 ## Reproducibility
 
 Identical `(model, time_grid, n_paths, seed)` inputs produce **bit-identical paths** on the same computational backend (CPU / GPU / TPU). Cross-backend bit-identity is not guaranteed due to floating-point differences across JAX backends. The `seed`, `prng_key_info`, and `library_version` metadata fields document full provenance for every batch.
