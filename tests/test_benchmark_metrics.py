@@ -404,3 +404,235 @@ def test_old_style_benchmark_result_json_still_loads():
     }
     result = BenchmarkResult(**old_style_payload)
     assert result.metrics == {"sharpe_ratio": 1.0}
+
+
+# ===========================================================================
+# Story 9.2 — Tail-Risk Metrics: Value-at-Risk and Conditional Value-at-Risk
+#
+# Covers all acceptance criteria from GitHub Issue #80. The NumPy reference
+# values below are computed in this test file only, never inside the
+# library — quantscenariobench.benchmark.metrics itself stays jax.numpy-only
+# (AD-18/AD-25, enforced by test_metrics_module_never_imports_scipy_or_numpy
+# above, which already covers the new _tail_risk.py file).
+# ===========================================================================
+
+_TAIL_RISK_TOL = 1e-12
+
+# A hand-computable 20-point return series (deterministic, fixed seed).
+_TAIL_RETURNS_20 = [
+    0.012, -0.034, 0.021, -0.008, 0.045, -0.062, 0.003, 0.017, -0.021, 0.009,
+    -0.051, 0.028, 0.014, -0.009, 0.036, -0.073, 0.005, -0.018, 0.022, -0.004,
+]
+
+
+def _numpy_var_cvar_reference(returns, alpha):
+    import numpy as np
+
+    losses = -np.asarray(returns)
+    nu = np.quantile(losses, alpha)
+    tail_mean = np.mean(np.maximum(losses - nu, 0.0)) / (1.0 - alpha)
+    return float(nu), float(nu + tail_mean)
+
+
+def _tail_risk_context(returns):
+    from quantscenariobench.benchmark.interface import PortfolioWeights
+    from quantscenariobench.benchmark.metrics import MetricContext
+
+    return MetricContext(
+        portfolio_returns=jnp.asarray(returns),
+        weights=PortfolioWeights(jnp.array([1.0])),
+        evaluation_returns=jnp.ones((1, 1)),
+    )
+
+
+# ---------------------------------------------------------------------------
+# AC1/AC2: value_at_risk(alpha)/conditional_value_at_risk(alpha) match a
+# NumPy reference to 1e-12 on a hand-computable 20-point series (FR-41)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("alpha", [0.90, 0.95])
+def test_var_and_cvar_match_numpy_reference(alpha):
+    # alpha is chosen so (1 - alpha) * 20 >= 1: the undersized-tail
+    # fallback (AC4, tested separately below) does not trigger here, so
+    # this test isolates the quantile/tail-mean arithmetic itself.
+    from quantscenariobench.benchmark.metrics import (
+        conditional_value_at_risk,
+        value_at_risk,
+    )
+
+    context = _tail_risk_context(_TAIL_RETURNS_20)
+    expected_var, expected_cvar = _numpy_var_cvar_reference(_TAIL_RETURNS_20, alpha)
+
+    actual_var = float(value_at_risk(alpha)(context))
+    actual_cvar = float(conditional_value_at_risk(alpha)(context))
+
+    assert actual_var == pytest.approx(expected_var, abs=_TAIL_RISK_TOL)
+    assert actual_cvar == pytest.approx(expected_cvar, abs=_TAIL_RISK_TOL)
+
+
+# ---------------------------------------------------------------------------
+# AC3: cvar_0.95 >= var_0.95 holds across several return series (property)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("seed", [0, 1, 2, 3, 4])
+def test_cvar_is_never_less_than_var(seed):
+    from quantscenariobench.benchmark.metrics import (
+        conditional_value_at_risk,
+        value_at_risk,
+    )
+
+    key = jax.random.PRNGKey(seed)
+    returns = jax.random.normal(key, (50,)) * 0.02
+    context = _tail_risk_context(returns)
+
+    var = float(value_at_risk(0.95)(context))
+    cvar = float(conditional_value_at_risk(0.95)(context))
+    assert cvar >= var - _TOL
+
+
+def test_cvar_is_never_less_than_var_on_hand_computable_series():
+    from quantscenariobench.benchmark.metrics import (
+        conditional_value_at_risk,
+        value_at_risk,
+    )
+
+    context = _tail_risk_context(_TAIL_RETURNS_20)
+    assert float(conditional_value_at_risk(0.95)(context)) >= float(
+        value_at_risk(0.95)(context)
+    )
+
+
+# ---------------------------------------------------------------------------
+# AC4: degenerate inputs return finite, documented values — never NaN/inf
+# (all-zero returns, a single-step series, an undersized tail sample count)
+# ---------------------------------------------------------------------------
+
+def test_var_and_cvar_finite_for_all_zero_returns():
+    from quantscenariobench.benchmark.metrics import (
+        conditional_value_at_risk,
+        value_at_risk,
+    )
+
+    context = _tail_risk_context(jnp.zeros(20))
+    for metric in (value_at_risk(0.95), conditional_value_at_risk(0.95)):
+        value = metric(context)
+        assert not bool(jnp.isnan(value))
+        assert not bool(jnp.isinf(value))
+        assert float(value) == pytest.approx(0.0)
+
+
+def test_var_and_cvar_finite_for_single_step_series():
+    from quantscenariobench.benchmark.metrics import (
+        conditional_value_at_risk,
+        value_at_risk,
+    )
+
+    context = _tail_risk_context(jnp.array([0.05]))
+    for metric in (value_at_risk(0.95), conditional_value_at_risk(0.95)):
+        value = metric(context)
+        assert not bool(jnp.isnan(value))
+        assert not bool(jnp.isinf(value))
+
+
+def test_var_and_cvar_fall_back_to_max_loss_when_tail_sample_count_undersized():
+    from quantscenariobench.benchmark.metrics import (
+        conditional_value_at_risk,
+        value_at_risk,
+    )
+
+    # t=10, alpha=0.995 => (1 - alpha) * t = 0.05 < 1: undersized tail.
+    returns = jnp.array(_TAIL_RETURNS_20[:10])
+    context = _tail_risk_context(returns)
+    expected_max_loss = float(jnp.max(-returns))
+
+    var = float(value_at_risk(0.995)(context))
+    cvar = float(conditional_value_at_risk(0.995)(context))
+    assert var == pytest.approx(expected_max_loss, abs=_TAIL_RISK_TOL)
+    assert cvar == pytest.approx(expected_max_loss, abs=_TAIL_RISK_TOL)
+    assert not bool(jnp.isnan(var)) and not bool(jnp.isinf(var))
+    assert not bool(jnp.isnan(cvar)) and not bool(jnp.isinf(cvar))
+
+
+# ---------------------------------------------------------------------------
+# AC7: docstrings state the sign convention (losses positive) and the
+# quantile interpolation rule explicitly
+# ---------------------------------------------------------------------------
+
+def test_tail_risk_module_docstring_states_sign_convention_and_interpolation_rule():
+    src = (_pkg_root() / "benchmark" / "metrics" / "_tail_risk.py").read_text()
+    assert "positive" in src
+    assert "linear" in src and "interpolat" in src
+
+
+# ---------------------------------------------------------------------------
+# AC8: DEFAULT_METRICS is unchanged — VaR/CVaR are opt-in only (AD-32)
+# ---------------------------------------------------------------------------
+
+def test_default_metrics_unchanged_by_tail_risk_metrics():
+    from quantscenariobench.benchmark.metrics import DEFAULT_METRICS
+
+    names = {metric.name for metric in DEFAULT_METRICS}
+    assert names == {
+        "sharpe_ratio", "sortino_ratio", "max_drawdown", "final_wealth_factor",
+    }
+    assert not any(name.startswith("var_") or name.startswith("cvar_") for name in names)
+
+
+# ---------------------------------------------------------------------------
+# value_at_risk/conditional_value_at_risk are correctly named, parametrized
+# Metric instances (name/direction/params shape, AD-31)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("alpha", [0.95, 0.99])
+def test_value_at_risk_metric_shape(alpha):
+    from quantscenariobench.benchmark.metrics import Metric, value_at_risk
+
+    metric = value_at_risk(alpha)
+    assert isinstance(metric, Metric)
+    assert metric.name == f"var_{alpha}"
+    assert metric.direction == "lower_is_better"
+    assert metric.params == {"alpha": alpha}
+
+
+@pytest.mark.parametrize("alpha", [0.95, 0.99])
+def test_conditional_value_at_risk_metric_shape(alpha):
+    from quantscenariobench.benchmark.metrics import Metric, conditional_value_at_risk
+
+    metric = conditional_value_at_risk(alpha)
+    assert isinstance(metric, Metric)
+    assert metric.name == f"cvar_{alpha}"
+    assert metric.direction == "lower_is_better"
+    assert metric.params == {"alpha": alpha}
+
+
+# ---------------------------------------------------------------------------
+# value_at_risk/conditional_value_at_risk stay jit-compatible (Review Focus)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("factory_name", ["value_at_risk", "conditional_value_at_risk"])
+def test_tail_risk_metric_is_jit_compatible(factory_name):
+    # MetricContext is deliberately not a pytree (AD-17 posture) and is
+    # never itself passed across a jit boundary; PortfolioWeights' own
+    # runtime validation also can't run under trace, so it is constructed
+    # eagerly once and closed over — only the returns array is traced,
+    # which is what "the metric body stays jax-native on the arrays it
+    # carries" (Story 9.1 Dev Notes) actually requires.
+    from quantscenariobench.benchmark import metrics as m
+    from quantscenariobench.benchmark.interface import PortfolioWeights
+    from quantscenariobench.benchmark.metrics import MetricContext
+
+    metric = getattr(m, factory_name)(0.95)
+    weights = PortfolioWeights(jnp.array([1.0]))
+
+    def score(returns):
+        context = MetricContext(
+            portfolio_returns=returns,
+            weights=weights,
+            evaluation_returns=jnp.ones((1, 1)),
+        )
+        return metric(context)
+
+    returns = jnp.asarray(_TAIL_RETURNS_20)
+    eager = score(returns)
+    jitted = jax.jit(score)(returns)
+    assert jnp.allclose(eager, jitted)
