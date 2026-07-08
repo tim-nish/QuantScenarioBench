@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import Optional
 
 
 @dataclasses.dataclass(frozen=True)
@@ -11,6 +12,14 @@ class BenchmarkResult:
     BenchmarkResult is a terminal artifact, never re-traced through
     jit/vmap, unlike Scenario (AD-2). Every field is JSON-native
     (str, float, int, dict, list); no JAX arrays, no eqx.Module fields.
+
+    rebalance_schedule is additive (FR-44, AD-33): the plain-dict
+    materialization of the RebalanceSchedule run_benchmark() was called
+    with (e.g. {"k": 21}), or None for buy-and-hold (the default and
+    every result published before this field existed) — kept as a plain
+    dict, not a RebalanceSchedule reference, so old published JSON
+    lacking this key still loads via the dataclass field's own default
+    (AC7), with no custom reconstruction required.
     """
 
     strategy_name: str
@@ -20,3 +29,4 @@ class BenchmarkResult:
     time_grid_reference: str
     library_version: str
     generated_at: str
+    rebalance_schedule: Optional[dict] = None

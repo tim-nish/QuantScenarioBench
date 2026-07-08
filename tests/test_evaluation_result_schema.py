@@ -21,6 +21,7 @@ REQUIRED_EVALUATION_RESULT_FIELDS = frozenset({
     "metrics",
     "library_version",
     "generated_at",
+    "rebalance_schedule",
 })
 
 
@@ -164,7 +165,9 @@ def test_evaluation_result_is_plain_frozen_dataclass_not_equinox_module():
     assert type(result).__dataclass_params__.frozen is True
     assert not isinstance(result, eqx.Module)
 
-    allowed_json_native = (str, float, int, dict, list)
+    # None is included for rebalance_schedule (FR-44, AD-33): an additive,
+    # opt-in field whose JSON-native value is either a dict or null.
+    allowed_json_native = (str, float, int, dict, list, type(None))
     for field in dataclasses.fields(EvaluationResult):
         value = getattr(result, field.name)
         if dataclasses.is_dataclass(value):
@@ -204,4 +207,5 @@ def test_benchmark_result_schema_unchanged_by_evaluation_result():
         "time_grid_reference",
         "library_version",
         "generated_at",
+        "rebalance_schedule",
     }

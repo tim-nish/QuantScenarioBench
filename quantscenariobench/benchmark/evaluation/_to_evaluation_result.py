@@ -31,6 +31,7 @@ def _result_id(result: BenchmarkResult) -> str:
             "time_grid_reference": result.time_grid_reference,
             "library_version": result.library_version,
             "generated_at": result.generated_at,
+            "rebalance_schedule": result.rebalance_schedule,
         },
         sort_keys=True,
     )
@@ -62,4 +63,5 @@ def to_evaluation_result(result: BenchmarkResult) -> EvaluationResult:
         ],
         library_version=result.library_version,
         generated_at=result.generated_at,
+        rebalance_schedule=result.rebalance_schedule,
     )
