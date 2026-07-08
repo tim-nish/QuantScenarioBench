@@ -218,6 +218,56 @@ def test_all_six_required_fields_present_in_card():
     assert not missing, f"Card missing required fields: {missing}"
 
 
+# ---------------------------------------------------------------------------
+# Story 13.1 (Issue #88) AC8: generate_dataset_card() embeds a RealismReport
+# additively when supplied; unchanged when not (FR-49, AD-38)
+# ---------------------------------------------------------------------------
+
+def test_generate_dataset_card_unchanged_when_no_realism_report_supplied():
+    card_with_none_default = generate_dataset_card(_bs_scenario())
+    card_with_explicit_none = generate_dataset_card(_bs_scenario(), realism_report=None)
+    assert card_with_none_default == card_with_explicit_none
+    assert "Scenario Realism Diagnostics" not in card_with_none_default
+
+
+def test_generate_dataset_card_embeds_realism_report_when_supplied():
+    from quantscenariobench.diagnostics import realism_report as compute_realism_report
+
+    scenario = _bs_scenario()
+    report = compute_realism_report(scenario)
+    card = generate_dataset_card(scenario, realism_report=report)
+
+    assert "Scenario Realism Diagnostics" in card
+    assert "excess_kurtosis" in card
+    assert "leverage_correlation" in card
+    # The card documents that out-of-band diagnostics are informational
+    # only, never used to reject/filter — the scenario itself still
+    # produced a complete card, not an error page.
+    assert "never rejected or filtered" in card
+
+
+def test_publish_to_hub_forwards_realism_report_to_card(tmp_path):
+    from quantscenariobench.diagnostics import realism_report as compute_realism_report
+
+    scenario = _bs_scenario()
+    report = compute_realism_report(scenario)
+
+    captured = {}
+
+    def _fake_upload_file(*, path_or_fileobj, path_in_repo, **kwargs):
+        if path_in_repo == "README.md":
+            captured["card"] = (
+                path_or_fileobj.decode() if isinstance(path_or_fileobj, bytes) else path_or_fileobj
+            )
+
+    with mock.patch("huggingface_hub.HfApi") as mock_api_cls:
+        mock_api = mock_api_cls.return_value
+        mock_api.upload_file.side_effect = _fake_upload_file
+        publish_to_hub([scenario], "org/repo", token="tok", realism_report=report)
+
+    assert "Scenario Realism Diagnostics" in captured["card"]
+
+
 def test_card_generated_for_heston():
     card = generate_dataset_card(_heston_scenario())
     assert "Heston" in card
