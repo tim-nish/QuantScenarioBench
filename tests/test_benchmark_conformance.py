@@ -109,6 +109,18 @@ def test_abc_enforcement_forecast_optimizer():
     assert_abc_enforcement(ForecastOptimizer)
 
 
+# ---------------------------------------------------------------------------
+# Story 10.1 (Issue #83) AC5/AD-33: PolicyStrategy follows the same
+# ABC-enforcement house style as BaselineStrategy/ForecastOptimizer
+# ---------------------------------------------------------------------------
+
+def test_abc_enforcement_policy_strategy():
+    from quantscenariobench.benchmark.interface import PolicyStrategy
+    from quantscenariobench.benchmark.testing import assert_abc_enforcement
+
+    assert_abc_enforcement(PolicyStrategy)
+
+
 def test_abc_enforcement_raises_type_error_directly():
     from quantscenariobench.benchmark.interface import BaselineStrategy
 

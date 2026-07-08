@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Any, Sequence, Union
 
 from jaxtyping import Array, Float
 
@@ -17,9 +17,15 @@ class MetricContext:
     exactly once inside run_benchmark() and consumed immediately, never
     re-traced through jit/vmap itself (individual Metric bodies remain
     jax.numpy-native on the arrays it carries).
+
+    weights is a single PortfolioWeights for a buy-and-hold run
+    (rebalance_schedule=None, the default) or a Sequence[PortfolioWeights]
+    — one per rebalance date — for a periodically rebalanced run (FR-44,
+    AD-33). Weight-dependent metrics (e.g. quantscenariobench.benchmark.
+    metrics.herfindahl_index) must handle both shapes.
     """
 
     portfolio_returns: Float[Array, " t"]
-    weights: PortfolioWeights
+    weights: Union[PortfolioWeights, Sequence[PortfolioWeights]]
     evaluation_returns: Float[Array, "t n"]
     auxiliary: dict[str, Any] = dataclasses.field(default_factory=dict)

@@ -165,9 +165,12 @@ def test_benchmark_result_is_frozen_dataclass_not_equinox_module():
 def test_benchmark_result_fields_are_json_native_types():
     from quantscenariobench.benchmark.interface import BenchmarkResult
     allowed = {str, float, int, dict, list}
+    # "Optional[dict]" covers rebalance_schedule (FR-44, AD-33): an
+    # additive, opt-in field whose JSON-native value is a dict or null.
     for f in dataclasses.fields(BenchmarkResult):
         assert f.type in {t.__name__ for t in allowed} or f.type in (
             "dict[str, float]",
+            "Optional[dict]",
         ), f"BenchmarkResult.{f.name} has non-JSON-native annotation {f.type!r}"
 
 

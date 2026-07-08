@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import Optional
 
 
 @dataclasses.dataclass(frozen=True)
@@ -51,6 +52,7 @@ class EvaluationResult:
     metrics: list[EvaluationMetric]
     library_version: str
     generated_at: str
+    rebalance_schedule: Optional[dict] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "EvaluationResult":
@@ -59,6 +61,10 @@ class EvaluationResult:
         The exact inverse of json.loads(json.dumps(dataclasses.asdict(result))),
         needed by any reader of a published EvaluationResult (e.g. Story 7.5's
         Leaderboard aggregation).
+
+        rebalance_schedule uses .get(...), defaulting to None, so an
+        EvaluationResult JSON file published before this field existed
+        still loads (FR-44, AC7) — the schema addition is additive only.
         """
         return cls(
             schema_version=data["schema_version"],
@@ -68,4 +74,5 @@ class EvaluationResult:
             metrics=[EvaluationMetric(**m) for m in data["metrics"]],
             library_version=data["library_version"],
             generated_at=data["generated_at"],
+            rebalance_schedule=data.get("rebalance_schedule"),
         )

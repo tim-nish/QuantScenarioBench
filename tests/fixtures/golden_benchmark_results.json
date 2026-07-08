@@ -1,0 +1,57 @@
+{
+  "CVaROptimization": {
+    "asset_scenario_ids": [
+      "a0",
+      "a1",
+      "a2",
+      "a3"
+    ],
+    "metrics": {
+      "final_wealth_factor": 0.9830014205215699,
+      "max_drawdown": -0.034578696014315284,
+      "sharpe_ratio": -0.09131068757079042,
+      "sortino_ratio": -0.12113728849281637
+    },
+    "strategy_name": "CVaROptimization",
+    "strategy_parameters": {
+      "confidence_level": 0.95
+    },
+    "time_grid_reference": "tg-golden-fixture"
+  },
+  "EqualWeight": {
+    "asset_scenario_ids": [
+      "a0",
+      "a1",
+      "a2",
+      "a3"
+    ],
+    "metrics": {
+      "final_wealth_factor": 0.9793220930713994,
+      "max_drawdown": -0.03396996035737244,
+      "sharpe_ratio": -0.12153149064671112,
+      "sortino_ratio": -0.15360370438829396
+    },
+    "strategy_name": "EqualWeight",
+    "strategy_parameters": {},
+    "time_grid_reference": "tg-golden-fixture"
+  },
+  "GlobalMinimumVariance": {
+    "asset_scenario_ids": [
+      "a0",
+      "a1",
+      "a2",
+      "a3"
+    ],
+    "metrics": {
+      "final_wealth_factor": 0.9793220930713994,
+      "max_drawdown": -0.03396996035737244,
+      "sharpe_ratio": -0.12153149064671112,
+      "sortino_ratio": -0.15360370438829396
+    },
+    "strategy_name": "GlobalMinimumVariance",
+    "strategy_parameters": {
+      "long_only": true
+    },
+    "time_grid_reference": "tg-golden-fixture"
+  }
+}
