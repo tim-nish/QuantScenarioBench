@@ -176,8 +176,9 @@ def test_aggregate_evaluation_results_returns_plain_list_of_dicts():
         for value in row.values():
             # None is included for cost_one_way_bps (FR-45, AD-34): the
             # value is None when the row's EvaluationResult used no cost
-            # model.
-            assert isinstance(value, (str, float, int, type(None)))
+            # model. dict is included for metrics_distribution (FR-46,
+            # AD-35): present only on a distributional row.
+            assert isinstance(value, (str, float, int, dict, type(None)))
 
 
 def test_leaderboard_module_has_no_ui_framework_dependency():
@@ -300,3 +301,65 @@ def test_load_evaluation_results_from_hub_reads_snapshot(tmp_path):
 
     assert mock_snapshot.called
     assert loaded == [result]
+
+
+# ---------------------------------------------------------------------------
+# Story 10.3 (Issue #85) AC6: an old EvaluationResult JSON with no
+# distribution block still loads and renders alongside new distributional
+# rows — mixed old/new rendering, mean±std where present (FR-46)
+# ---------------------------------------------------------------------------
+
+def test_aggregate_evaluation_results_renders_mixed_old_and_distributional_rows():
+    from quantscenariobench.benchmark.evaluation import (
+        EvaluationBenchmarkDataset,
+        EvaluationStrategy,
+        aggregate_evaluation_results,
+    )
+
+    old_style_result = _make_evaluation_result(
+        strategy=EvaluationStrategy(name="EqualWeight", parameters={}),
+        benchmark_dataset=EvaluationBenchmarkDataset(
+            asset_scenario_ids=["a0"], time_grid_reference="tg-old"
+        ),
+    )
+    assert old_style_result.metrics_distribution is None
+
+    distributional_result = _make_evaluation_result(
+        strategy=EvaluationStrategy(name="GlobalMinimumVariance", parameters={}),
+        benchmark_dataset=EvaluationBenchmarkDataset(
+            asset_scenario_ids=["a0"], time_grid_reference="tg-new"
+        ),
+        metrics_distribution={
+            "sharpe_ratio": {
+                "mean": 1.23, "std": 0.1, "ci_low": 1.0, "ci_high": 1.4,
+                "n_repeats": 32, "values": [1.2, 1.3],
+            },
+        },
+    )
+
+    table = aggregate_evaluation_results([old_style_result, distributional_result])
+
+    assert len(table) == 2
+    rows_by_dataset = {row["benchmark_dataset"]: row for row in table}
+    assert "metrics_distribution" not in rows_by_dataset["tg-old"]
+    assert rows_by_dataset["tg-new"]["metrics_distribution"]["sharpe_ratio"]["mean"] == 1.23
+    # The plain scalar (mean) column is unaffected either way — ranking
+    # keeps using it regardless of whether a distribution is attached.
+    assert rows_by_dataset["tg-new"]["sharpe_ratio"] == 1.23
+
+
+def test_old_evaluation_result_json_without_distribution_block_still_loads():
+    from quantscenariobench.benchmark.evaluation import EvaluationResult
+
+    old_style_payload = {
+        "schema_version": "1.0",
+        "result_id": "result-0001",
+        "strategy": {"name": "EqualWeight", "parameters": {}},
+        "benchmark_dataset": {"asset_scenario_ids": [], "time_grid_reference": "tg-0"},
+        "metrics": [{"name": "sharpe_ratio", "value": 1.0}],
+        "library_version": "1.0.0",
+        "generated_at": "2026-01-01T00:00:00+00:00",
+        # rebalance_schedule/cost_model/metrics_distribution intentionally omitted
+    }
+    result = EvaluationResult.from_dict(old_style_payload)
+    assert result.metrics_distribution is None

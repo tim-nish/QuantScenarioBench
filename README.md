@@ -286,6 +286,37 @@ for bps in (0, 5, 10):
 
 - The active `rebalance_schedule`/`cost_model` are recorded on `BenchmarkResult`/`EvaluationResult` (additive fields) and join the Leaderboard aggregation key, so results at different `bps` never collapse into the same row.
 
+### Distributional Evaluation
+
+`simulate()` already generates tens of thousands of i.i.d. paths per Scenario; `run_benchmark_distributional()` reuses that ensemble — no re-simulation — to score a strategy over R independent path draws and report mean ± std, a confidence interval, and (via `compare_strategies`) a paired significance test against another strategy, matching arXiv:2510.03129's reporting standard:
+
+```python
+from quantscenariobench.benchmark.runner import run_benchmark_distributional
+from quantscenariobench.benchmark.evaluation import compare_strategies
+
+result = run_benchmark_distributional(
+    strategy, [scenario_a, scenario_b, scenario_c], n_historical=30,
+    n_repeats=32, seed=0,   # R=32 by default; reuses n_paths already simulated
+)
+print(result.metrics)                       # per-metric mean, unchanged scalar shape
+print(result.metrics_distribution["sharpe_ratio"])
+# {'mean': 0.040, 'std': 0.155, 'ci_low': -0.013, 'ci_high': 0.092, 'n_repeats': 32, 'values': [...]}
+```
+
+Reproducing arXiv:2510.03129 Table 1's mean±std reporting style from actual output on two strategies over the same R=32 draws:
+
+| Strategy               | Sharpe (mean ± std)   | 95% CI            |
+|------------------------|------------------------|--------------------|
+| `EqualWeight`           | 0.040 ± 0.155          | [-0.013, 0.092]    |
+| `GlobalMinimumVariance` | 0.046 ± 0.169          | [-0.011, 0.105]    |
+
+```python
+comparison = compare_strategies(result_a, result_b, "sharpe_ratio")
+# {'mean_difference': ..., 'p_value_ttest': ..., 'p_value_wilcoxon': ...}
+```
+
+`compare_strategies` requires `result_a`/`result_b` to come from the *same* R path draws — pass identical `scenarios`/`seed`/`n_repeats` to both `run_benchmark_distributional()` calls being compared; alignment is paired by construction and not re-derived after the fact. `n_repeats=1` collapses to an ordinary `run_benchmark()` result exactly (`metrics_distribution` stays `None`).
+
 ### Implementing a custom strategy
 
 ```python

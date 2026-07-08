@@ -1,3 +1,4 @@
+from ._compare_strategies import compare_strategies
 from ._evaluation_result import (
     EvaluationBenchmarkDataset,
     EvaluationMetric,
@@ -19,6 +20,7 @@ __all__ = [
     "EvaluationResult",
     "EvaluationStrategy",
     "aggregate_evaluation_results",
+    "compare_strategies",
     "generate_evaluation_results_card",
     "load_evaluation_results",
     "load_evaluation_results_from_hub",

@@ -23,6 +23,7 @@ REQUIRED_EVALUATION_RESULT_FIELDS = frozenset({
     "generated_at",
     "rebalance_schedule",
     "cost_model",
+    "metrics_distribution",
 })
 
 
@@ -210,4 +211,5 @@ def test_benchmark_result_schema_unchanged_by_evaluation_result():
         "generated_at",
         "rebalance_schedule",
         "cost_model",
+        "metrics_distribution",
     }

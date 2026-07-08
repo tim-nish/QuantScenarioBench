@@ -33,6 +33,7 @@ def _result_id(result: BenchmarkResult) -> str:
             "generated_at": result.generated_at,
             "rebalance_schedule": result.rebalance_schedule,
             "cost_model": result.cost_model,
+            "metrics_distribution": result.metrics_distribution,
         },
         sort_keys=True,
     )
@@ -66,4 +67,5 @@ def to_evaluation_result(result: BenchmarkResult) -> EvaluationResult:
         generated_at=result.generated_at,
         rebalance_schedule=result.rebalance_schedule,
         cost_model=result.cost_model,
+        metrics_distribution=result.metrics_distribution,
     )

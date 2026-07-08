@@ -31,6 +31,7 @@ REQUIRED_BENCHMARK_RESULT_FIELDS = frozenset({
     "generated_at",
     "rebalance_schedule",
     "cost_model",
+    "metrics_distribution",
 })
 
 

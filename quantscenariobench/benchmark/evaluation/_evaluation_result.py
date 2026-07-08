@@ -54,6 +54,7 @@ class EvaluationResult:
     generated_at: str
     rebalance_schedule: Optional[dict] = None
     cost_model: Optional[dict] = None
+    metrics_distribution: Optional[dict] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "EvaluationResult":
@@ -63,10 +64,10 @@ class EvaluationResult:
         needed by any reader of a published EvaluationResult (e.g. Story 7.5's
         Leaderboard aggregation).
 
-        rebalance_schedule/cost_model use .get(...), defaulting to None,
-        so an EvaluationResult JSON file published before either field
-        existed still loads (FR-44/FR-45, AC7) — both schema additions
-        are additive only.
+        rebalance_schedule/cost_model/metrics_distribution use .get(...),
+        defaulting to None, so an EvaluationResult JSON file published
+        before any of these fields existed still loads (FR-44/FR-45/FR-46,
+        AC6/AC7) — every schema addition is additive only.
         """
         return cls(
             schema_version=data["schema_version"],
@@ -78,4 +79,5 @@ class EvaluationResult:
             generated_at=data["generated_at"],
             rebalance_schedule=data.get("rebalance_schedule"),
             cost_model=data.get("cost_model"),
+            metrics_distribution=data.get("metrics_distribution"),
         )
