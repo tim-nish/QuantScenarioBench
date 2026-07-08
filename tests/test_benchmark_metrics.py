@@ -216,3 +216,191 @@ def test_no_test_file_imports_a_portfolio_analytics_library():
         f"AD-10 (amended) violation: reference values must be hand-derived, "
         f"not imported from a portfolio-analytics library: {violations}"
     )
+
+
+# ===========================================================================
+# Story 9.1 — Context-Aware Metric Interface (MetricContext) & Metric
+# Metadata
+#
+# Covers all acceptance criteria from GitHub Issue #79.
+# ===========================================================================
+
+def _make_context(returns, n_assets=1):
+    from quantscenariobench.benchmark.interface import PortfolioWeights
+    from quantscenariobench.benchmark.metrics import MetricContext
+
+    return MetricContext(
+        portfolio_returns=returns,
+        weights=PortfolioWeights(jnp.full((n_assets,), 1.0 / n_assets)),
+        evaluation_returns=jnp.ones((1, n_assets)),
+    )
+
+
+# ---------------------------------------------------------------------------
+# AC1: MetricContext is a frozen value object carrying at minimum
+# portfolio_returns, weights, evaluation_returns, and an extensible
+# auxiliary field (FR-40, AD-31)
+# ---------------------------------------------------------------------------
+
+def test_metric_context_carries_required_fields():
+    import dataclasses
+
+    returns = jnp.array(_RETURNS)
+    context = _make_context(returns)
+
+    assert jnp.array_equal(context.portfolio_returns, returns)
+    assert context.weights.weights.shape == (1,)
+    assert context.evaluation_returns.shape == (1, 1)
+    assert context.auxiliary == {}
+    assert dataclasses.is_dataclass(context)
+    assert type(context).__dataclass_params__.frozen is True
+
+
+def test_metric_context_is_not_an_equinox_module():
+    import equinox as eqx
+
+    context = _make_context(jnp.array(_RETURNS))
+    assert not isinstance(context, eqx.Module)
+
+
+# ---------------------------------------------------------------------------
+# AC2: the Metric protocol declares name, direction, params, and
+# __call__(context) -> scalar (FR-40, AD-31)
+# ---------------------------------------------------------------------------
+
+def test_metric_protocol_is_runtime_checkable_and_matches_wrapped_metric():
+    from quantscenariobench.benchmark.metrics import DEFAULT_METRICS, Metric
+
+    for metric in DEFAULT_METRICS:
+        assert isinstance(metric, Metric)
+
+
+# ---------------------------------------------------------------------------
+# AC3: a trivial weight-dependent metric implementing the new protocol
+# scores correctly given a MetricContext (FR-40)
+# ---------------------------------------------------------------------------
+
+def test_weight_dependent_metric_reads_context_weights():
+    class SumOfSquaredWeights:
+        name = "sum_of_squared_weights"
+        direction = "lower_is_better"
+        params = None
+
+        def __call__(self, context):
+            return jnp.sum(context.weights.weights ** 2)
+
+    context = _make_context(jnp.array(_RETURNS), n_assets=1)
+    metric = SumOfSquaredWeights()
+    assert float(metric(context)) == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# AC4: the four pre-existing metrics migrated via wrap_legacy_metric are
+# bit-identical to calling the bare MetricFn directly, and DEFAULT_METRICS
+# names are unchanged (FR-40, AD-31)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name", [
+    "sharpe_ratio", "sortino_ratio", "max_drawdown", "final_wealth_factor",
+])
+def test_default_metrics_are_bit_identical_to_raw_metric_fn(name):
+    from quantscenariobench.benchmark import metrics as m
+    from quantscenariobench.benchmark.metrics import DEFAULT_METRICS
+
+    raw_fn = getattr(m, name)
+    wrapped = next(metric for metric in DEFAULT_METRICS if metric.name == name)
+
+    returns = jnp.array(_RETURNS)
+    context = _make_context(returns)
+    assert jnp.array_equal(raw_fn(returns), wrapped(context))
+
+
+def test_default_metrics_names_unchanged():
+    from quantscenariobench.benchmark.metrics import DEFAULT_METRICS
+
+    names = {metric.name for metric in DEFAULT_METRICS}
+    assert names == {
+        "sharpe_ratio", "sortino_ratio", "max_drawdown", "final_wealth_factor",
+    }
+
+
+# ---------------------------------------------------------------------------
+# AC5: wrap_legacy_metric adapts a bare MetricFn into the Metric protocol,
+# preserving .name and forwarding context.portfolio_returns unchanged
+# ---------------------------------------------------------------------------
+
+def test_wrap_legacy_metric_preserves_name_and_forwards_portfolio_returns():
+    from quantscenariobench.benchmark.metrics import wrap_legacy_metric
+
+    def custom_metric(returns):
+        return jnp.sum(returns)
+    custom_metric.name = "total_return"
+
+    wrapped = wrap_legacy_metric(custom_metric, direction="lower_is_better")
+    assert wrapped.name == "total_return"
+    assert wrapped.direction == "lower_is_better"
+    assert wrapped.params is None
+
+    returns = jnp.array(_RETURNS)
+    context = _make_context(returns)
+    assert wrapped(context) == custom_metric(returns)
+
+
+# ---------------------------------------------------------------------------
+# AC6: two Metric instances of a parametrized family with different
+# params/names (e.g. cvar_0.95, cvar_0.99) coexist in one registry
+# without tripping duplicate-name validation
+# ---------------------------------------------------------------------------
+
+def test_validate_metric_registry_allows_parametrized_metrics_with_distinct_names():
+    from quantscenariobench.benchmark.metrics import validate_metric_registry
+
+    class _ParamMetric:
+        def __init__(self, alpha):
+            self.name = f"cvar_{alpha}"
+            self.direction = "lower_is_better"
+            self.params = {"alpha": alpha}
+
+        def __call__(self, context):
+            return jnp.min(context.portfolio_returns)
+
+    validate_metric_registry((_ParamMetric(0.95), _ParamMetric(0.99)))  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# AC7: BenchmarkResult/EvaluationResult are unchanged by this story — a
+# JSON file written by the previous library version (no direction/params
+# fields) still loads, since the schema addition is deferred (FR-40, NFR-6)
+# ---------------------------------------------------------------------------
+
+def test_benchmark_result_schema_has_no_new_direction_or_params_fields():
+    import dataclasses
+    from quantscenariobench.benchmark.interface import BenchmarkResult
+
+    field_names = {f.name for f in dataclasses.fields(BenchmarkResult)}
+    assert "direction" not in field_names
+    assert "params" not in field_names
+
+
+def test_evaluation_metric_schema_has_no_new_direction_or_params_fields():
+    import dataclasses
+    from quantscenariobench.benchmark.evaluation import EvaluationMetric
+
+    field_names = {f.name for f in dataclasses.fields(EvaluationMetric)}
+    assert field_names == {"name", "value"}
+
+
+def test_old_style_benchmark_result_json_still_loads():
+    from quantscenariobench.benchmark.interface import BenchmarkResult
+
+    old_style_payload = {
+        "strategy_name": "EqualWeight",
+        "strategy_parameters": {},
+        "metrics": {"sharpe_ratio": 1.0},
+        "asset_scenario_ids": [],
+        "time_grid_reference": "tg-0",
+        "library_version": "1.0.0",
+        "generated_at": "2026-01-01T00:00:00+00:00",
+    }
+    result = BenchmarkResult(**old_style_payload)
+    assert result.metrics == {"sharpe_ratio": 1.0}

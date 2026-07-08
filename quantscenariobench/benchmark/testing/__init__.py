@@ -3,6 +3,7 @@ from ._conformance import (
     assert_baseline_strategy_conforms,
     assert_deterministic_weights,
     assert_forecast_optimizer_conforms,
+    assert_metric_conforms,
     assert_portfolio_weights_valid,
 )
 from ._dummy_forecast_optimizer import DummyForecastOptimizer
@@ -13,5 +14,6 @@ __all__ = [
     "assert_baseline_strategy_conforms",
     "assert_deterministic_weights",
     "assert_forecast_optimizer_conforms",
+    "assert_metric_conforms",
     "assert_portfolio_weights_valid",
 ]
