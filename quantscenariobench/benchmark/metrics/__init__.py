@@ -1,3 +1,4 @@
+from ._calmar import annualized_sharpe, calmar_ratio
 from ._context import MetricContext
 from ._final_wealth_factor import final_wealth_factor
 from ._max_drawdown import max_drawdown
@@ -12,6 +13,8 @@ __all__ = [
     "Metric",
     "MetricContext",
     "MetricFn",
+    "annualized_sharpe",
+    "calmar_ratio",
     "conditional_value_at_risk",
     "final_wealth_factor",
     "max_drawdown",

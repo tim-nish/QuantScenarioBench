@@ -248,6 +248,13 @@ print(result.metrics)
 - **`run_benchmark()`** (`quantscenariobench.benchmark.runner`) fits the strategy once (static buy-and-hold), applies its weights across `evaluation_returns`, and returns a JSON-serializable `BenchmarkResult` (`strategy_name`, `strategy_parameters`, `metrics`, `asset_scenario_ids`, `time_grid_reference`, `library_version`, `generated_at`).
 - A conformance test suite (`quantscenariobench.benchmark.testing`) verifies a custom `BaselineStrategy`/`ForecastOptimizer` implementation against the interface, with zero changes to `run_benchmark()`.
 
+### Metric Conventions
+
+- **Risk-free rate** is 0 for every ratio metric (Sharpe, Sortino, annualized Sharpe) unless a metric's name says otherwise.
+- **No metric annualizes by default.** `sharpe_ratio`, `sortino_ratio`, and every other `DEFAULT_METRICS` entry report their raw, un-annualized value.
+- **Annualization** is opt-in and uses one documented convention: `periods_per_year=252`, applied only by metrics whose name says `_annualized_<N>` (e.g. `annualized_sharpe(252)` → `sharpe_ratio_annualized_252`) or that otherwise take `periods_per_year` as an explicit parameter (e.g. `calmar_ratio`). These are never silently added to `DEFAULT_METRICS` — always opt-in.
+- **Compounding** for drawdown/Calmar/wealth-factor metrics (`max_drawdown`, `calmar_ratio`, `final_wealth_factor`) is via `cumprod(1 + returns)`, with wealth(0) implicit at 1.0.
+
 ### Implementing a custom strategy
 
 ```python

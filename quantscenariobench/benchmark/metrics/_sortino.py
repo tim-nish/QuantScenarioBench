@@ -12,6 +12,9 @@ def sortino_ratio(returns: Float[Array, " t"]) -> Float[Array, ""]:
     is the root-mean-square of the negative part of each period's return
     (periods with non-negative returns contribute 0). Returns 0.0 (rather
     than raising) when there are no negative returns (AD-18).
+
+    See README "Metric Conventions" for the risk-free-rate, annualization,
+    and compounding conventions shared across this metrics package.
     """
     mean = jnp.mean(returns)
     downside = jnp.minimum(returns, 0.0)

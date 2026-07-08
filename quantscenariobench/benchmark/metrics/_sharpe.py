@@ -10,6 +10,9 @@ def sharpe_ratio(returns: Float[Array, " t"]) -> Float[Array, ""]:
     Risk-free rate 0, no annualization: mean(returns) / std(returns).
     Returns 0.0 (rather than raising or NaN/inf) when the return series
     has zero variance (AD-18).
+
+    See README "Metric Conventions" for the risk-free-rate, annualization,
+    and compounding conventions shared across this metrics package.
     """
     mean = jnp.mean(returns)
     std = jnp.std(returns)
