@@ -105,8 +105,27 @@ def test_space_requirements_pin_gradio_and_quantscenariobench():
 
 
 def test_gradio_absent_from_installable_package_dependencies():
-    pyproject_text = (_repo_root() / "pyproject.toml").read_text()
-    assert "gradio" not in pyproject_text.lower()
+    # AD-27's guard, narrowed (PR #100): gradio must never be a dependency
+    # of the installable package — neither runtime nor any extra except
+    # [dev]. The dev extra is the one sanctioned exception: this test suite
+    # itself imports spaces/leaderboard/app.py (which imports gradio), so
+    # the documented contributor flow — pip install -e ".[dev]" && pytest —
+    # must bring gradio with it (the repository's first CI run failed 23
+    # Space tests without it). The previous whole-file string scan could
+    # not distinguish the package's own dependency list from the dev
+    # tooling's, so it is replaced with a check of the actual lists.
+    import tomllib
+
+    pyproject = tomllib.loads((_repo_root() / "pyproject.toml").read_text())
+    runtime_deps = "\n".join(pyproject["project"]["dependencies"])
+    assert "gradio" not in runtime_deps.lower()
+    extras = pyproject["project"].get("optional-dependencies", {})
+    for extra_name, extra_deps in extras.items():
+        if extra_name == "dev":
+            continue
+        assert "gradio" not in "\n".join(extra_deps).lower(), (
+            f"gradio leaked into the {extra_name!r} extra"
+        )
 
 
 # ---------------------------------------------------------------------------
