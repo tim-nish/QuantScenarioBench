@@ -1,7 +1,7 @@
 # QuantScenarioBench
 
 [![CI](https://github.com/tim-nish/QuantScenarioBench/actions/workflows/ci.yml/badge.svg)](https://github.com/tim-nish/QuantScenarioBench/actions/workflows/ci.yml)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21097248.svg)](https://doi.org/10.5281/zenodo.21097248)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21097247.svg)](https://doi.org/10.5281/zenodo.21097247)
 
 A JAX-native Python framework for generating reproducible stochastic market scenarios and benchmarking portfolio strategies against them, with built-in export to Parquet and the Hugging Face Hub.
 
@@ -542,7 +542,7 @@ If you use QuantScenarioBench in your research, please cite it. Citation
 metadata lives in [`CITATION.cff`](CITATION.cff) — use GitHub's
 **"Cite this repository"** button for ready-made BibTeX/APA, or cite the
 archived release via the Zenodo DOI badge at the top of this README
-(the concept DOI `10.5281/zenodo.21097248` always resolves to the latest
+(the concept DOI `10.5281/zenodo.21097247` always resolves to the latest
 release).
 
 ---
