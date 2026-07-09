@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "quantscenariobench"
 version = "1.2.1"
 description = "JAX-native framework for generating reproducible market scenarios, benchmarking portfolio strategies against them, and publishing results as versioned datasets with a hosted Leaderboard"
+readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
 dependencies = [
