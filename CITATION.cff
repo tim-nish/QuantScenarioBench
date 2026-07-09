@@ -1,0 +1,32 @@
+# Citation metadata (Citation File Format) — renders GitHub's
+# "Cite this repository" button.
+#
+# Maintenance notes:
+# - `doi` is the Zenodo *concept* DOI (same as the README badge): it always
+#   resolves to the latest release, so it does not need updating per release.
+# - `version` / `date-released` DO change per release — bumping them is a
+#   step in docs/RELEASE_CHECKLIST.md ("Release-prep PR").
+cff-version: 1.2.0
+message: "If you use QuantScenarioBench in your research, please cite it as below."
+title: "QuantScenarioBench"
+type: software
+authors:
+  - family-names: "Imanishi"
+    given-names: "Tomoya"
+version: "1.2.1"
+date-released: "2026-07-04"
+doi: "10.5281/zenodo.21097248"
+repository-code: "https://github.com/tim-nish/QuantScenarioBench"
+license: MIT
+abstract: >-
+  A JAX-native Python framework for generating reproducible stochastic
+  market scenarios and benchmarking portfolio strategies against them,
+  with built-in export to Parquet and the Hugging Face Hub.
+keywords:
+  - quantitative finance
+  - benchmark
+  - stochastic volatility
+  - scenario generation
+  - portfolio optimization
+  - reproducibility
+  - JAX

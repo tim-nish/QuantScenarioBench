@@ -528,6 +528,17 @@ The test suite covers closed-form price validation (Gil-Pélaez inversion for He
 
 ---
 
+## Citing
+
+If you use QuantScenarioBench in your research, please cite it. Citation
+metadata lives in [`CITATION.cff`](CITATION.cff) — use GitHub's
+**"Cite this repository"** button for ready-made BibTeX/APA, or cite the
+archived release via the Zenodo DOI badge at the top of this README
+(the concept DOI `10.5281/zenodo.21097248` always resolves to the latest
+release).
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE) for the full text.
