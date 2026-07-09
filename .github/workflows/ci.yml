@@ -1,0 +1,41 @@
+# CI — full test suite on every push to main and every pull request.
+#
+# Design notes:
+# - Matrix covers the supported floor (3.11, per requires-python) and the
+#   development version (3.12). 3.13 is deliberately omitted until the JAX/
+#   diffrax stack is verified against it — widen the matrix in its own PR.
+# - JAX runs CPU-only on hosted runners; every test is written for that
+#   (the full suite takes ~8 minutes locally on CPU).
+# - No HF_TOKEN or network secrets: Hub-publishing tests run against mocks.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package with dev dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run test suite
+        run: pytest -q

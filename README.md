@@ -1,5 +1,6 @@
 # QuantScenarioBench
 
+[![CI](https://github.com/tim-nish/QuantScenarioBench/actions/workflows/ci.yml/badge.svg)](https://github.com/tim-nish/QuantScenarioBench/actions/workflows/ci.yml)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21097248.svg)](https://doi.org/10.5281/zenodo.21097248)
 
 A JAX-native Python framework for generating reproducible stochastic market scenarios and benchmarking portfolio strategies against them, with built-in export to Parquet and the Hugging Face Hub.
