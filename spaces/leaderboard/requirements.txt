@@ -1,3 +1,3 @@
 gradio>=6.19
 pandas>=2.0
-quantscenariobench @ git+https://github.com/tim-nish/QuantScenarioBench.git@v1.2.1
+quantscenariobench @ git+https://github.com/tim-nish/QuantScenarioBench.git@v1.3.0

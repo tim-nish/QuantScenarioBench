@@ -524,6 +524,12 @@ The same suite runs in CI on every push and pull request (see the badge at the t
 | EvaluationResult pipeline (transform, local storage, HF publishing) | Shipped — v1.1 |
 | Leaderboard **aggregation** (ranked table from published results, no UI) | Shipped — v1.1 |
 | Hugging Face Space — hosted Gradio Leaderboard **UI**, with sorting and filtering | Shipped — v1.2 |
+| Context-aware metrics (`MetricContext`) + tail-risk (VaR/CVaR), Calmar, and concentration metrics | Shipped — v1.3 |
+| Periodic rebalancing (`PolicyStrategy`), turnover metric, proportional transaction costs | Shipped — v1.3 |
+| Distributional evaluation across scenario paths + strategy significance tests | Shipped — v1.3 |
+| Correlated multi-asset scenario generation (`simulate_correlated_basket`) | Shipped — v1.3 |
+| Hierarchical Risk Parity baseline strategy | Shipped — v1.3 |
+| Scenario realism diagnostics — stylized-facts validation (`realism_report`) | Shipped — v1.3 |
 | Advanced analytics, visualizations, historical/trend tracking, strategy-comparison tooling | Not planned |
 
 **v1.1 shipped the data; v1.2 ships the dashboard:** `aggregate_evaluation_results()` still returns a plain `list[dict]` you can put in a `pandas.DataFrame`, a notebook, or your own app — but as of v1.2 you can also browse the same ranked table live on the hosted [Leaderboard Space](#leaderboard-space), with sorting and filtering built in. That Space was the explicit v1.2 goal referenced in earlier releases' roadmaps; it is deliberately scoped to the ranked table alone — see the Leaderboard Space section's "Out of scope" note for what's intentionally not included.
