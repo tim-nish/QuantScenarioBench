@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/) for the
 library itself. Dataset versions are tracked independently (see `dataset_version`
 in each `Scenario`'s metadata).
 
+## [1.3.0] - 2026-07-09
+
+### Added
+
+- **Context-aware metric interface** (Epic 9): the `Metric` protocol with
+  per-metric metadata and a validated registry, plus `MetricContext` so
+  metrics can consume weights, schedules, and auxiliary runner state —
+  legacy `fn(returns) -> float` metrics keep working via
+  `wrap_legacy_metric` (`quantscenariobench.benchmark.metrics`).
+- **Tail-risk metrics**: `value_at_risk` and `conditional_value_at_risk`.
+- **Calmar ratio and explicit annualization convention**: `calmar_ratio`
+  and opt-in `annualized_sharpe`.
+- **Concentration/diversification metrics**: `herfindahl_index`,
+  `weight_entropy`, and `effective_number_of_assets`.
+- **Periodic rebalancing and the `PolicyStrategy` interface** (Epic 10):
+  `RebalanceSchedule(k=...)` drives a rebalance-schedule-aware rolling loop
+  with a no-lookahead invariant and weight drift between rebalance dates;
+  `PolicyStrategy.allocate_sequence()` is called once per rebalance date
+  (`quantscenariobench.benchmark.interface`).
+- **Turnover metric and proportional transaction costs**: `turnover` /
+  `turnover_annualized` metrics and the `ProportionalCost` cost model,
+  deducted from gross returns at each rebalance by the runner.
+- **Distributional evaluation**: `run_benchmark_distributional()` scores a
+  strategy across many scenario paths — per-metric mean/std/confidence
+  intervals in `BenchmarkResult.metrics_distribution` — and
+  `compare_strategies()` reports paired significance tests (t-test and
+  Wilcoxon).
+- **Correlated multi-asset scenario generation** (Epic 11):
+  `simulate_correlated_basket()` draws correlated Brownian drivers across
+  per-asset models and records the correlation structure in
+  `BasketMetadata` (`quantscenariobench.api`, `.interface`).
+- **Hierarchical Risk Parity baseline** (Epic 12): `HierarchicalRiskParity`
+  joins the baseline strategy set
+  (`quantscenariobench.benchmark.strategies`).
+- **Scenario realism diagnostics** (Epic 13): `realism_report()` scores
+  generated paths against stylized facts (fat tails, volatility
+  clustering, autocorrelation structure) into a standardized
+  `RealismReport` of `DiagnosticStat`s (`quantscenariobench.diagnostics`).
+- **Open-source project foundations**: MIT `LICENSE` file, GitHub Actions
+  CI (full suite on every push/PR, Python 3.11 + 3.12), `CITATION.cff`
+  citation metadata (Zenodo concept DOI, ORCID), the release process as a
+  permanent document (`docs/RELEASE_CHECKLIST.md`), and complete package
+  long-description metadata (`twine check` passes clean).
+
+### Fixed
+
+- **Strategy-parameter serialization** (#99): `run_benchmark()` no longer
+  assumes every non-primitive strategy field is `float()`-convertible.
+  Primitives and `None` pass through, collections serialize recursively,
+  scalar arrays keep the historical float conversion, and anything else —
+  e.g. a neural-network module held as a `PolicyStrategy` field — falls
+  back to `repr()`, so result serialization never fails a completed run.
+
+### Notes
+
+- `gradio` is now declared in the `[dev]` extras (the test suite covers the
+  Leaderboard Space), and AD-27's guard was narrowed accordingly: gradio
+  remains banned from the installable package's runtime dependencies and
+  every non-dev extra — a plain `pip install quantscenariobench` still
+  never pulls it.
+- This is intended to be the first release published to **PyPI**; until it
+  is uploaded, the README's `pip install quantscenariobench` instruction
+  refers to the upcoming publication (see `docs/RELEASE_CHECKLIST.md`,
+  "Package publish").
+
 ## [1.2.1] - 2026-07-04
 
 ### Fixed
