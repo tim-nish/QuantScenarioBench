@@ -14,6 +14,7 @@ authors:
   - family-names: "Imanishi"
     given-names: "Tomoya"
     alias: "tim-nish"
+    orcid: "https://orcid.org/0009-0007-0920-536X"
 version: "1.2.1"
 date-released: "2026-07-04"
 doi: "10.5281/zenodo.21097248"
