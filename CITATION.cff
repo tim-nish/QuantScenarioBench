@@ -13,6 +13,7 @@ type: software
 authors:
   - family-names: "Imanishi"
     given-names: "Tomoya"
+    alias: "tim-nish"
 version: "1.2.1"
 date-released: "2026-07-04"
 doi: "10.5281/zenodo.21097248"
