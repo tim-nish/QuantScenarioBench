@@ -43,16 +43,35 @@ def _utc_now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
+def _serialize_parameter(value: Any) -> Any:
+    """One strategy field → a JSON-native value (issue #99).
+
+    Primitives and None pass through unchanged; lists/tuples/dicts are
+    serialized recursively. Anything else first keeps the historical
+    float() conversion (scalar JAX/NumPy arrays), then falls back to
+    repr() — so a strategy holding, say, a neural-network module as a
+    field serializes to an identifying string instead of raising. The
+    broad except is deliberate: __float__ on arbitrary objects can raise
+    anything, and serialization must never fail a completed run.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_serialize_parameter(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _serialize_parameter(item) for key, item in value.items()}
+    try:
+        return float(value)
+    except Exception:
+        return repr(value)
+
+
 def _strategy_parameters(strategy: Any) -> dict:
     """JSON-native snapshot of a strategy's own recorded fields (AD-15, AD-24)."""
-    params: dict = {}
-    for field in dataclasses.fields(strategy):
-        value = getattr(strategy, field.name)
-        if isinstance(value, (bool, int, float, str)):
-            params[field.name] = value
-        else:
-            params[field.name] = float(value)
-    return params
+    return {
+        field.name: _serialize_parameter(getattr(strategy, field.name))
+        for field in dataclasses.fields(strategy)
+    }
 
 
 def _run_rebalancing_loop(

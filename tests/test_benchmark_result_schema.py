@@ -218,3 +218,77 @@ def test_concentration_metrics_survive_evaluation_result_json_round_trip():
 
     restored_metrics = {m.name: m.value for m in restored.metrics}
     assert restored_metrics == result.metrics
+
+
+# ---------------------------------------------------------------------------
+# Issue #99: strategy_parameters must serialize non-primitive strategy
+# fields (e.g. a neural-network module held as a field) instead of
+# raising on float() — primitives and None pass through, collections
+# recurse, scalar arrays keep the historical float() conversion, and
+# anything else falls back to repr().
+# ---------------------------------------------------------------------------
+
+class _FakeNeuralNet:
+    """Stands in for a torch.nn.Module / Flax module: not float()-able."""
+
+    def __repr__(self):
+        return "FakeNeuralNet(layers=2)"
+
+
+def test_strategy_parameters_serialize_non_primitive_fields():
+    from quantscenariobench.benchmark.interface import (
+        PolicyStrategy,
+        PortfolioWeights,
+        RebalanceSchedule,
+    )
+
+    class NeuralPolicy(PolicyStrategy):
+        model: object
+        learning_rate: float
+        window: object          # None — optional field left unset
+        hidden_sizes: tuple     # collection of primitives, recursed
+        decay: object           # scalar JAX array — historical float() path
+
+        def allocate_sequence(self, observed_returns):
+            n = observed_returns.shape[1]
+            return PortfolioWeights(jnp.full((n,), 1.0 / n))
+
+    strategy = NeuralPolicy(
+        model=_FakeNeuralNet(),
+        learning_rate=1e-3,
+        window=None,
+        hidden_sizes=(64, 32),
+        decay=jnp.asarray(0.9),
+    )
+    result = _run(strategy, rebalance_schedule=RebalanceSchedule(k=5))
+
+    params = result.strategy_parameters
+    assert params["model"] == "FakeNeuralNet(layers=2)"
+    assert params["learning_rate"] == 1e-3
+    assert params["window"] is None
+    assert params["hidden_sizes"] == [64, 32]
+    assert params["decay"] == pytest.approx(0.9)
+
+
+def test_strategy_parameters_with_non_primitive_fields_json_round_trip():
+    from quantscenariobench.benchmark.interface import (
+        PolicyStrategy,
+        PortfolioWeights,
+        RebalanceSchedule,
+    )
+
+    class ModelBackedPolicy(PolicyStrategy):
+        model: object
+
+        def allocate_sequence(self, observed_returns):
+            n = observed_returns.shape[1]
+            return PortfolioWeights(jnp.full((n,), 1.0 / n))
+
+    result = _run(
+        ModelBackedPolicy(model=_FakeNeuralNet()),
+        rebalance_schedule=RebalanceSchedule(k=5),
+    )
+
+    payload = json.dumps(dataclasses.asdict(result))
+    restored = json.loads(payload)
+    assert restored["strategy_parameters"]["model"] == "FakeNeuralNet(layers=2)"
