@@ -24,6 +24,7 @@ dev = [
     "pytest-cov>=5.0",
     "pandas>=2.0",
     "datasets>=2.0",
+    "gradio>=6.19",
 ]
 
 [tool.hatch.build.targets.wheel]
