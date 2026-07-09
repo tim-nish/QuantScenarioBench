@@ -28,9 +28,9 @@ branch and merged via PR, then tagged (`v1.0.0`–`v1.2.1` all followed this).
       (Keep a Changelog format: Added / Changed / Fixed / Notes).
 - [ ] Update the README: Roadmap table statuses, docs for new capabilities,
       and any version numbers quoted in examples.
-- [ ] Bump the pinned library ref in `spaces/leaderboard/requirements.txt`
-      (`quantscenariobench @ git+...@vX.Y.Z`, or a `quantscenariobench==X.Y.Z`
-      PyPI pin — the package is on PyPI since v1.3.0).
+- [ ] Bump the pinned library ref in `spaces/leaderboard/requirements.txt` to
+      the **PyPI** pin `quantscenariobench==X.Y.Z` (the package is on PyPI since
+      v1.3.0; prefer this over the old `git+...@vX.Y.Z` GitHub-tag install).
 - [ ] Verify `spaces/leaderboard/README.md` front-matter (`sdk_version`) still
       matches what the Space actually runs.
 - [ ] Update `CITATION.cff` (version + release date; DOI after step 3 if versioned DOIs are cited).
@@ -59,8 +59,14 @@ branch and merged via PR, then tagged (`v1.0.0`–`v1.2.1` all followed this).
       release notes so downstream benchmark users can pin them.
 - [ ] Confirm the Evaluation Results repo (`QSB_EVAL_RESULTS_REPO`) is reachable
       and its documented default matches reality.
-- [ ] Redeploy the Leaderboard Space: push `spaces/leaderboard/` contents to the
-      Space's git repo; watch the build; confirm the table renders.
+- [ ] **Redeploy the Leaderboard Space (manual until automated).** Confirm
+      `spaces/leaderboard/requirements.txt` pins `quantscenariobench==X.Y.Z`
+      (the PyPI version, done in step 2) — this must happen only *after* PyPI is
+      live (step 4), or the Space's `pip install` will fail — then push
+      `spaces/leaderboard/` contents to the Space's git repo, watch the build,
+      and confirm the table renders. This step is slated to be automated via
+      GitHub Actions; see `docs/todo-hf-space-release-automation.md`. **Do not
+      forget it** — it is the one release step with no CI safety net today.
 - [ ] End-to-end smoke test: run a baseline strategy on a published dataset with
       the released version, `publish_evaluation_results()`, and confirm the run
       appears on the live Space.
