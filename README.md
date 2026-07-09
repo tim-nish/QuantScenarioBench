@@ -510,6 +510,8 @@ pytest
 
 The test suite covers closed-form price validation (Gil-Pélaez inversion for Heston; Black-Scholes formula for GBM), statistical properties (skew monotonicity in H for rBergomi), Parquet round-trips, and dataset card conformance — plus the Benchmark Core (metrics and baselines validated against hand-derived reference values, Portfolio Optimizer conformance suite), the Evaluation Results pipeline (`BenchmarkResult` → `EvaluationResult` transform, local storage, and Leaderboard aggregation), and the Leaderboard Space (`spaces/leaderboard/`: data loading/rendering, sorting, filtering, and deployment configuration).
 
+The same suite runs in CI on every push and pull request (see the badge at the top of this README). Releases follow [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md).
+
 ---
 
 ## Roadmap
