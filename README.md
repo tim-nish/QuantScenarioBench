@@ -529,4 +529,4 @@ The test suite covers closed-form price validation (Gil-Pélaez inversion for He
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE) for the full text.
