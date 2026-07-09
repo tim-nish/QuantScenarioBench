@@ -17,3 +17,6 @@ htmlcov/
 # Virtual environments
 .venv/
 venv/
+
+# Session scratch — local Q&A working files, not team-shared
+q_a/
