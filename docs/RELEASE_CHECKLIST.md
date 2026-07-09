@@ -29,7 +29,8 @@ branch and merged via PR, then tagged (`v1.0.0`–`v1.2.1` all followed this).
 - [ ] Update the README: Roadmap table statuses, docs for new capabilities,
       and any version numbers quoted in examples.
 - [ ] Bump the pinned library ref in `spaces/leaderboard/requirements.txt`
-      (`quantscenariobench @ git+...@vX.Y.Z` — or the PyPI pin once published there).
+      (`quantscenariobench @ git+...@vX.Y.Z`, or a `quantscenariobench==X.Y.Z`
+      PyPI pin — the package is on PyPI since v1.3.0).
 - [ ] Verify `spaces/leaderboard/README.md` front-matter (`sdk_version`) still
       matches what the Space actually runs.
 - [ ] Update `CITATION.cff` (version + release date; DOI after step 3 if versioned DOIs are cited).
@@ -43,10 +44,6 @@ branch and merged via PR, then tagged (`v1.0.0`–`v1.2.1` all followed this).
       concept-DOI badge in the README still resolves.
 
 ## 4. Package publish (PyPI)
-
-> ⚠️ As of v1.2.1 the package is **not** on PyPI even though the README says
-> `pip install quantscenariobench`. Until first PyPI publication, either publish
-> or fix the README install instructions — don't release with a broken install path.
 
 - [ ] Build from the tag: `python -m build` (hatchling backend); `twine check dist/*`.
 - [ ] Upload (`twine upload` — or GitHub Actions trusted publishing once configured).

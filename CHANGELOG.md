@@ -67,10 +67,10 @@ in each `Scenario`'s metadata).
   remains banned from the installable package's runtime dependencies and
   every non-dev extra — a plain `pip install quantscenariobench` still
   never pulls it.
-- This is intended to be the first release published to **PyPI**; until it
-  is uploaded, the README's `pip install quantscenariobench` instruction
-  refers to the upcoming publication (see `docs/RELEASE_CHECKLIST.md`,
-  "Package publish").
+- This is the first release published to **PyPI**
+  ([pypi.org/project/quantscenariobench](https://pypi.org/project/quantscenariobench/)) —
+  the README's `pip install quantscenariobench` instruction works as of
+  this release.
 
 ## [1.2.1] - 2026-07-04
 
