@@ -130,23 +130,30 @@ def test_readme_documents_no_hardware_upgrade_should_be_requested():
 
 
 # ---------------------------------------------------------------------------
-# Deploying QuantScenarioBench/qsb-leaderboard hit a real BUILD_ERROR:
-# quantscenariobench is not published on PyPI ("ERROR: Could not find a
-# version that satisfies the requirement quantscenariobench>=1.1.0 (from
-# versions: none)"). requirements.txt must install it from a source pip
-# can actually resolve (the project's own git repo, pinned to a tag),
-# not a bare version specifier that silently assumes PyPI availability.
+# The Space must pin quantscenariobench to a *specific, installable* version so
+# its build is reproducible — never a floating spec that can drift under it.
+# History: an early deploy hit a real BUILD_ERROR because the package was not
+# yet on PyPI ("Could not find a version that satisfies the requirement
+# quantscenariobench>=1.1.0 ... from versions: none"), so the pin had to be a
+# git+tag reference. Since v1.3.0 the package IS on PyPI, so an exact PyPI pin
+# (quantscenariobench==X.Y.Z) is the preferred installable form; a git+...@tag
+# reference is still accepted. What stays banned is an unpinned or range spec.
 # ---------------------------------------------------------------------------
 
-def test_requirements_does_not_assume_quantscenariobench_is_on_pypi():
+def test_requirements_pins_quantscenariobench_to_an_installable_version():
+    import re
+
     text = (_space_dir() / "requirements.txt").read_text()
     for line in text.splitlines():
-        if line.strip().lower().startswith("quantscenariobench"):
-            assert "git+" in line or "@" in line, (
-                "quantscenariobench is not published on PyPI — a bare "
-                f"version specifier ('{line.strip()}') fails to build on "
-                "the Hub. Pin it to an installable source, e.g. "
-                "'quantscenariobench @ git+https://github.com/.../QuantScenarioBench.git@vX.Y.Z'"
+        stripped = line.strip()
+        if stripped.lower().startswith("quantscenariobench"):
+            exact_pypi_pin = re.search(r"==\s*\d+\.\d+\.\d+", stripped) is not None
+            git_tag_pin = "git+" in stripped and "@" in stripped
+            assert exact_pypi_pin or git_tag_pin, (
+                f"quantscenariobench must be pinned to an exact, installable "
+                f"version ('{stripped}' is not): either a PyPI pin "
+                "'quantscenariobench==X.Y.Z' (preferred, on PyPI since v1.3.0) "
+                "or a 'git+https://.../QuantScenarioBench.git@vX.Y.Z' reference."
             )
             break
     else:
